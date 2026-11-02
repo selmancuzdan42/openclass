@@ -1,0 +1,145 @@
+@import "tailwindcss";
+
+/* Tema, data-theme özniteliğiyle elle değiştirilir; öznitelik yoksa
+   işletim sisteminin tercihi kullanılır. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ---------------------------------------------------------------------------
+   Tasarım belirteçleri
+   ---------------------------------------------------------------------------
+   Yoğunluk bilinçlidir: bu bir web panosu değil, öğretmenin ders boyunca
+   önünde duracağı bir masaüstü aracıdır. Tipografi 12–13 px, satır
+   yükseklikleri 26–32 px, köşeler küçük (4–6 px), gölge neredeyse yok.
+   Renkler Windows'un Fluent paletine yakın tutuldu ki uygulama işletim
+   sistemine yabancı durmasın.
+--------------------------------------------------------------------------- */
+
+@theme {
+  /* Yüzey katmanları: pencere kromu → içerik → kart */
+  --color-chrome: #f3f3f3;
+  --color-surface: #ffffff;
+  --color-surface-2: #fafafa;
+  --color-surface-3: #eeeeee;
+  --color-canvas: #e9e9e9;
+
+  --color-stroke: #e1e1e1;
+  --color-stroke-strong: #c8c8c8;
+
+  --color-text: #1b1b1b;
+  --color-text-2: #5c5c5c;
+  --color-text-3: #8a8a8a;
+
+  --color-accent: #0f6cbd;
+  --color-accent-hover: #115ea3;
+  --color-accent-soft: #e5f0fb;
+  --color-accent-border: #a9c9e8;
+
+  --color-ok: #0f7b35;
+  --color-warn: #b45309;
+  --color-danger: #c42b1c;
+}
+
+:root[data-theme="dark"] {
+  --color-chrome: #202020;
+  --color-surface: #272727;
+  --color-surface-2: #2d2d2d;
+  --color-surface-3: #323232;
+  --color-canvas: #1a1a1a;
+
+  --color-stroke: #3b3b3b;
+  --color-stroke-strong: #4a4a4a;
+
+  --color-text: #f0f0f0;
+  --color-text-2: #b4b4b4;
+  --color-text-3: #878787;
+
+  --color-accent: #60a5fa;
+  --color-accent-hover: #93c5fd;
+  --color-accent-soft: #1d3a5c;
+  --color-accent-border: #2f5d8f;
+
+  --color-ok: #4ade80;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-text);
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.35;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+input,
+textarea,
+[data-selectable] {
+  user-select: text;
+}
+
+/* Odak halkası: klavyeyle gezinen kullanıcı her zaman nerede olduğunu görsün. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* Yüksek DPI ekranlarda ince kenarlıklar kaybolmasın. */
+@media (min-resolution: 1.5dppx) {
+  .hairline {
+    border-width: 0.5px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-stroke-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-3);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Küçük resim boyutu kaydırıcısı */
+input[type="range"].size-slider {
+  appearance: none;
+  height: 3px;
+  background: var(--color-stroke-strong);
+  border-radius: 99px;
+  outline: none;
+}
+input[type="range"].size-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  cursor: pointer;
+}

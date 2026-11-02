@@ -1,0 +1,31 @@
+[package]
+name = "openclass-common"
+description = "OpenClass uygulamalarının paylaştığı yardımcılar: yollar, loglama, TLS, gizli saklama"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+openclass-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+hostname = { workspace = true }
+directories = { workspace = true }
+uuid = { workspace = true }
+rcgen = { workspace = true }
+rustls-pemfile = { workspace = true }
+time = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+] }

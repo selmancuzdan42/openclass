@@ -1,0 +1,21 @@
+{
+  "name": "openclass",
+  "private": true,
+  "version": "0.1.0",
+  "description": "NetSupport School'a ücretsiz ve açık kaynak alternatif — sınıf yönetim yazılımı",
+  "license": "GPL-3.0-or-later",
+  "workspaces": [
+    "packages/*",
+    "apps/teacher",
+    "apps/student"
+  ],
+  "scripts": {
+    "dev:teacher": "npm run tauri:dev --workspace apps/teacher",
+    "dev:student": "npm run tauri:dev --workspace apps/student",
+    "build:teacher": "npm run tauri:build --workspace apps/teacher",
+    "build:student": "npm run tauri:build --workspace apps/student",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:rust": "cargo test --workspace",
+    "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings"
+  }
+}

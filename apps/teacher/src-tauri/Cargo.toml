@@ -1,0 +1,59 @@
+[package]
+name = "openclass-teacher"
+description = "OpenClass öğretmen konsolu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+# Tauri v2 mobil hedefleri için kütüphane adı ayrıca tanımlanır.
+name = "openclass_teacher_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# `tauri build` bu özelliği otomatik açar. Açıkken `tauri::is_dev()` false
+# döner ve arayüz ikiliye gömülür; geliştirme sunucusuna (Vite) ihtiyaç
+# kalmaz. Hata ayıklama derlemesinde de elle açılabilir — yerel test betiği
+# bunu yapar, böylece test Vite'ın ayakta olmasına bağlı kalmaz.
+default = []
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+openclass-protocol = { workspace = true }
+openclass-common = { workspace = true }
+openclass-screen = { workspace = true }
+local-ip-address = "0.6.13"
+
+tauri = { workspace = true }
+tauri-plugin-dialog = "2.4.1"
+tauri-plugin-opener = "2.7.2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+tokio = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
+bytes = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+
+rusqlite = { workspace = true }
+directories = { workspace = true }
+getrandom = { workspace = true }
+sha2 = { workspace = true }
+socket2 = "0.6.1"
+uuid = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.24.0"

@@ -1,0 +1,30 @@
+# Rust
+/target/
+**/target/
+
+# Node
+node_modules/
+apps/*/dist/
+*.tsbuildinfo
+
+# Tauri üretilen dosyalar
+apps/*/src-tauri/gen/
+
+# Editör / işletim sistemi
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Yerel ortam
+.env
+.env.local
+
+# Derleme çıktıları
+*.exe
+*.msi
+dist/
+
+# İç geliştirme notları — depoya girmez
+docs/ic/

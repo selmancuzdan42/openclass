@@ -1,0 +1,23 @@
+[package]
+name = "openclass-screen"
+description = "Ekran yakalama, ölçekleme ve değişen bölge kodlaması"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+openclass-protocol = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+
+# Görüntü işleme: yalnızca ölçekleme için; kodek desteği kapalı tutulur
+# (cross-compile'ı C bağımlılıklarından uzak tutmak için).
+image = { version = "0.25.10", default-features = false }
+jpeg-encoder = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-capture = "2.0.1"

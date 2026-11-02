@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpenClass Student",
+  "mainBinaryName": "OpenClass-Student",
+  "version": "0.1.0",
+  "identifier": "io.openclass.student",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1421",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ocbcast: http://ocbcast.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "OpenClass",
+    "copyright": "GPL-3.0-or-later",
+    "category": "Education",
+    "shortDescription": "Sınıf yönetimi — öğrenci ajanı",
+    "longDescription": "OpenClass Student, öğretmen konsoluyla güvenli biçimde eşleşir, ders oturumu boyunca ekran paylaşımını görünür şekilde yürütür ve yardım talebi göndermeyi sağlar.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "languages": [
+          "Turkish",
+          "English"
+        ],
+        "displayLanguageSelector": false,
+        "installMode": "perMachine"
+      },
+      "webviewInstallMode": {
+        "type": "offlineInstaller",
+        "silent": true
+      }
+    }
+  }
+}

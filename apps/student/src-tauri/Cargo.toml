@@ -1,0 +1,62 @@
+[package]
+name = "openclass-student"
+description = "OpenClass öğrenci ajanı"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "openclass_student_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# `tauri build` bu özelliği otomatik açar. Açıkken `tauri::is_dev()` false
+# döner ve arayüz ikiliye gömülür; geliştirme sunucusuna (Vite) ihtiyaç
+# kalmaz. Hata ayıklama derlemesinde de elle açılabilir — yerel test betiği
+# bunu yapar, böylece test Vite'ın ayakta olmasına bağlı kalmaz.
+default = []
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+openclass-protocol = { workspace = true }
+openclass-common = { workspace = true }
+openclass-screen = { workspace = true }
+
+tauri = { workspace = true, features = ["tray-icon", "image-png"] }
+tauri-plugin-opener = "2.7.2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+tokio = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+
+directories = { workspace = true }
+sha2 = { workspace = true }
+socket2 = "0.6.1"
+uuid = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tempfile = "3.24.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_Registry",
+    "Win32_Storage_FileSystem",
+] }
