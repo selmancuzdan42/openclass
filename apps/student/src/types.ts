@@ -5,13 +5,6 @@ export type ConnectionStatus =
   | { kind: "pairing" }
   | { kind: "connected"; teacherName: string };
 
-export interface ActiveSession {
-  sessionId: string;
-  teacherName: string;
-  className: string;
-  startedAt: number;
-}
-
 export interface SharingState {
   active: boolean;
   backend: string | null;
@@ -73,7 +66,6 @@ export interface StatusSnapshot {
   deviceId: string;
   appVersion: string;
   status: ConnectionStatus;
-  session: ActiveSession | null;
   sharing: SharingState;
   helpRequested: boolean;
   pairedTeacherName: string | null;
@@ -81,4 +73,6 @@ export interface StatusSnapshot {
   manualAddress: string | null;
   notices: ReceivedNotice[];
   captureSupported: boolean;
+  /** Bu bilgisayarın bulunduğu laboratuvar/oda adı; girilmemişse `null`. */
+  room: string | null;
 }

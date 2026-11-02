@@ -36,16 +36,13 @@ function makeDevice(hostname: string, i: number): DeviceView {
     frameAgeMs: i === 7 ? 14_000 : 400,
     connectedAt: Math.floor(Date.now() / 1000) - 900,
     screenError: i === 6 ? "Ekran yakalama başlatılamadı: sanal ekran sürücüsü desteklemiyor." : null,
+    // Oda adını bildirmeyen cihazlar da olmalı: 0.1.0'dan yükselen ajanlar
+    // bu alanı göndermez ve arayüz onları "—" ile göstermek zorunda.
+    room: i === 13 || i === 14 ? null : hostname.startsWith("LAB1") ? "Lab 1" : "Lab 2",
   };
 }
 
 const devices = HOSTS.map(makeDevice);
-
-let session: { sessionId: string; className: string; startedAt: number } | null = {
-  sessionId: "11111111-1111-4111-8111-111111111111",
-  className: "Lab 1 — 11-A Bilişim",
-  startedAt: Math.floor(Date.now() / 1000) - 1_450,
-};
 
 let groups = [
   { name: "Lab 1", prefix: "LAB1" },
@@ -63,6 +60,8 @@ const serverInfo: ServerInfo = {
   onlineCount: devices.filter((d) => d.online).length,
   extraDiscoveryHosts: [],
   setupCompleted: true,
+  activeRoom: null,
+  activePrefix: null,
   networkError: null,
 };
 
@@ -83,7 +82,6 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
 
   search_devices: () => devices,
   get_server_info: () => serverInfo,
-  get_session: () => session,
   frame_base_url: () => "/mock-frame",
   list_groups: () => groups,
   get_pairing: () => null,
@@ -97,6 +95,9 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   get_browse: () => null,
   open_downloads_dir: () => null,
   send_file: () => "00000000-0000-0000-0000-000000000000",
+  get_download_root: () => "C:\\Users\\Hoca\\Belgeler\\OpenClass\\Toplanan",
+  set_download_root: (args: Record<string, unknown>) =>
+    (args.path as string | null) ?? "C:\\Users\\Hoca\\Belgeler\\OpenClass\\Toplanan",
   get_transfers: () => [],
   clear_finished_transfers: () => null,
   lock_devices: () => 1,
@@ -106,8 +107,10 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   send_remote_input: () => null,
   get_audit_log: () => audit,
   suggest_groups: () => [
-    { prefix: "LAB1", deviceCount: 12 },
-    { prefix: "LAB2", deviceCount: 4 },
+    { prefix: "", deviceCount: 12, room: "Lab 1" },
+    { prefix: "", deviceCount: 4, room: "Lab 2" },
+    { prefix: "LAB1", deviceCount: 12, room: null },
+    { prefix: "LAB2", deviceCount: 4, room: null },
   ],
   start_pairing: () => ({
     code: "428913",
@@ -116,18 +119,6 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
     failedAttempts: 0,
   }),
   cancel_pairing: () => null,
-  start_session: () => {
-    session = {
-      sessionId: "33333333-3333-4333-8333-333333333333",
-      className: serverInfo.className,
-      startedAt: Math.floor(Date.now() / 1000),
-    };
-    return session;
-  },
-  end_session: () => {
-    session = null;
-    return null;
-  },
   start_screen_streams: (args) => (args.deviceIds as string[]).length,
   stop_screen_streams: () => null,
   focus_device: () => null,

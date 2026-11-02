@@ -7,7 +7,7 @@
 //!
 //! # Sınırlar
 //!
-//! * Yalnızca **aktif ders oturumunda** açılır.
+//! * Öğrencide gezgin açık olduğu sürece görünür bir gösterge durur.
 //! * Aynı anda **tek** öğrenci gezilebilir.
 //! * Her listeleme ve her indirme denetim kaydına yazılır.
 //! * Öğrencide gezgin açık olduğu sürece görünür bir gösterge durur ve
@@ -51,8 +51,11 @@ impl Download {
         name: &str,
         size: u64,
         expected: [u8; 32],
+        root: Option<&std::path::Path>,
     ) -> Result<Self> {
-        let dir = downloads_dir()?.join(sanitize_component(hostname));
+        // Bilgisayar adı alt klasörü seçilen kökün altında da korunur:
+        // iki öğrenciden gelen aynı adlı dosya birbirini ezmemeli.
+        let dir = downloads_dir(root)?.join(sanitize_component(hostname));
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("klasör oluşturulamadı: {}", dir.display()))?;
 
@@ -126,7 +129,26 @@ impl Download {
 }
 
 /// İndirilen dosyaların yazıldığı klasör.
-pub fn downloads_dir() -> Result<PathBuf> {
+///
+/// `custom` verilmişse o klasör kullanılır — öğretmen indirmeleri kendi
+/// seçtiği yere toplayabilir. Verilmezse `Belgeler\OpenClass\Toplanan`
+/// kullanılır.
+///
+/// Seçilen klasör öğretmenin **kendi** makinesindedir, uzak bir yol değil;
+/// bu yüzden serbest yol kabul edilir. Yine de var olup olmadığı
+/// doğrulanır: silinmiş bir klasöre indirmeye kalkıp aktarımın yarısında
+/// patlamak yerine baştan varsayılana düşmek daha iyidir.
+pub fn downloads_dir(custom: Option<&std::path::Path>) -> Result<PathBuf> {
+    if let Some(kok) = custom {
+        if kok.is_dir() {
+            return Ok(kok.to_path_buf());
+        }
+        tracing::warn!(
+            klasor = %kok.display(),
+            "seçilen indirme klasörü yok, varsayılana dönülüyor"
+        );
+    }
+
     let base = directories::UserDirs::new()
         .and_then(|u| u.document_dir().map(std::path::Path::to_path_buf))
         .map(|d| d.join("OpenClass").join("Toplanan"))

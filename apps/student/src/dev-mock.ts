@@ -12,12 +12,6 @@ const snapshot: StatusSnapshot = {
   deviceId: "731583ec-5d80-47c9-819d-0b4e260e8e0b",
   appVersion: "0.1.0",
   status: { kind: "connected", teacherName: "Cihan Güngör" },
-  session: {
-    sessionId: "11111111-1111-4111-8111-111111111111",
-    teacherName: "Cihan Güngör",
-    className: "Lab 1 — 11-A Bilişim",
-    startedAt: Math.floor(Date.now() / 1000) - 1_450,
-  },
   sharing: {
     active: true,
     backend: "Windows Graphics Capture",
@@ -45,6 +39,8 @@ const snapshot: StatusSnapshot = {
     },
   ],
   captureSupported: true,
+  // Sihirbazı denemek için `null` yapın: oda ve eşleştirme yoksa açılır.
+  room: "Lab 1",
 };
 
 const HANDLERS: Record<string, () => unknown> = {
@@ -66,6 +62,7 @@ const HANDLERS: Record<string, () => unknown> = {
   cancel_help: () => null,
   clear_notices: () => null,
   set_manual_address: () => null,
+  set_room: () => null,
   unpair: () => null,
   pair_with_teacher: () => null,
   hide_config_window: () => null,

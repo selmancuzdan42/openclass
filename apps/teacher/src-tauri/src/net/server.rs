@@ -189,6 +189,7 @@ async fn handle_connection(
 
     let device_id = authenticated.device_id;
     let hostname = authenticated.hostname.clone();
+    let room = authenticated.room.clone();
 
     // Yazma görevi: kanala düşen mesajları WebSocket'e aktarır.
     let (tx, mut rx) = mpsc::channel::<ServerMessage>(SEND_QUEUE);
@@ -220,7 +221,7 @@ async fn handle_connection(
         drop(previous);
     }
 
-    state.db.touch_device(device_id, &hostname).ok();
+    state.db.touch_device(device_id, &hostname, room.as_deref()).ok();
     state
         .db
         .audit(AuditKind::DeviceConnected, Some(device_id), Some(&hostname));
@@ -231,26 +232,15 @@ async fn handle_connection(
     //
     // Kilitler `await` noktasından ÖNCE bırakılır: `parking_lot` guard'ı
     // `Send` değildir, await üzerinden taşınırsa görev spawn edilemez.
-    let pending_session = {
-        let session = state.session.read().clone();
-        let teacher_name = state.config.read().teacher_name.clone();
-        session.map(|s| (s, teacher_name))
-    };
-    if let Some((session, teacher_name)) = pending_session {
-        let _ = tx
-            .send(ServerMessage::SessionStart {
-                session_id: session.session_id,
-                teacher_name,
-                class_name: session.class_name,
-            })
-            .await;
-
-        // Ekran akışını kendiliğinden başlat. Öğretmenin cihazı seçip
-        // "Ekranları Göster" demesini beklemek gereksiz bir adımdı:
-        // konsolu açan öğretmen zaten ekranları görmek istiyor.
-        //
-        // Öğrencide bu gizli değil — tepsi simgesi değişir ve "EKRANINIZ
-        // PAYLAŞILIYOR" yazar.
+    // Ekran akışını kendiliğinden başlat. Öğretmenin cihazı seçip
+    // "Ekranları Göster" demesini beklemek gereksiz bir adımdı: konsolu açan
+    // öğretmen zaten ekranları görmek istiyor.
+    //
+    // Öğrencide bu gizli değil — tepsi simgesi değişir ve "EKRANINIZ
+    // PAYLAŞILIYOR" yazar. Görünür gösterge, kaldırılan ders oturumu
+    // kapısının yerine geçen tek koruma olduğu için **hiçbir koşulda**
+    // atlanmaz.
+    {
         let quality = openclass_protocol::StreamQuality::PREVIEW;
         if tx
             .send(ServerMessage::StartScreenStream {
@@ -335,9 +325,17 @@ async fn handle_connection(
 }
 
 /// Yetkilendirilmiş bağlantının bilgisi.
+/// Oda adının kabul edilen en fazla karakter sayısı.
+///
+/// Öğrenci tarafında da aynı sınır uygulanır; buradaki kırpma, değiştirilmiş
+/// bir istemciden uzun değer gelmesine karşı ikinci savunmadır.
+const ROOM_MAX_CHARS: usize = 64;
+
 struct Authenticated {
     device_id: Uuid,
     hostname: String,
+    /// Öğrencinin bildirdiği oda adı; eski sürüm ajanlarda `None`.
+    room: Option<String>,
 }
 
 type WsSink = futures_util::stream::SplitSink<
@@ -361,6 +359,7 @@ async fn authenticate(
         hostname,
         app_version,
         public_key,
+        room,
     } = recv(source).await?
     else {
         bail!("ilk mesaj Hello olmalıydı");
@@ -383,6 +382,13 @@ async fn authenticate(
     if hostname.is_empty() {
         bail!("boş bilgisayar adı");
     }
+
+    // Oda adı öğrencinin beyanıdır; yetki kararında **kullanılmaz**, yalnızca
+    // listede gruplamaya yarar. Bu yüzden reddetmek yerine temizlenir: boş ya
+    // da yalnızca boşluktan oluşan değer `None` olur, uzun değer kırpılır.
+    let room = room
+        .map(|r| r.trim().chars().take(ROOM_MAX_CHARS).collect::<String>())
+        .filter(|r| !r.is_empty());
 
     let claimed_key: [u8; 32] = public_key
         .as_slice()
@@ -505,6 +511,7 @@ async fn authenticate(
             Ok(Authenticated {
                 device_id,
                 hostname,
+                room,
             })
         }
 
@@ -574,9 +581,12 @@ async fn authenticate(
 
             match verdict {
                 Ok(()) => {
-                    state
-                        .db
-                        .upsert_paired_device(device_id, &hostname, &pair_key)?;
+                    state.db.upsert_paired_device(
+                        device_id,
+                        &hostname,
+                        &pair_key,
+                        room.as_deref(),
+                    )?;
                     state
                         .db
                         .audit(AuditKind::DevicePaired, Some(device_id), Some(&hostname));
@@ -609,6 +619,7 @@ async fn authenticate(
                     Ok(Authenticated {
                         device_id,
                         hostname,
+                        room,
                     })
                 }
                 Err(reason) => {
@@ -647,11 +658,11 @@ async fn read_loop(
     loop {
         tokio::select! {
             _ = cancel.cancelled() => {
-                // Uygulama kapanıyor: öğrenciye dersin bittiğini bildir.
-                let session = state.session.read().clone();
-                if let Some(session) = session {
-                    let _ = tx.send(ServerMessage::SessionEnd { session_id: session.session_id }).await;
-                }
+                // Konsol kapanıyor: öğrenciye yayını durdurmasını söyle.
+                // Bağlantının kopması da aynı sonucu verir ama açık bildirim
+                // göstergeyi anında düşürür, öğrenci bir an bile gereksiz
+                // yere "paylaşılıyor" görmez.
+                let _ = tx.send(ServerMessage::StopScreenStream { stream_id: 0 }).await;
                 return Ok(());
             }
 
@@ -703,13 +714,6 @@ async fn handle_client_message(
             stream_id,
             ..
         } => {
-            // Ders bitmişse gelen veri kabul edilmez. Öğrenci tarafı da
-            // yayını durdurur; bu kontrol ikinci savunma hattıdır.
-            if !state.session_active() {
-                tracing::debug!(%device_id, "oturum yokken gelen güncelleme atıldı");
-                return;
-            }
-
             let bytes: usize = rects.iter().map(|r| r.data.len()).sum();
 
             // İlk veri gelişi `info` seviyesinde: "yayın başladı ama ekran
@@ -908,7 +912,16 @@ async fn handle_client_message(
                 }
             };
 
-            match crate::browse::Download::open(request_id, &hostname, &name, size, sha256) {
+            // Kök kilidi `await` üzerinden taşınmasın diye kopyalanır.
+            let kok = state.download_root.read().clone();
+            match crate::browse::Download::open(
+                request_id,
+                &hostname,
+                &name,
+                size,
+                sha256,
+                kok.as_deref(),
+            ) {
                 Ok(download) => {
                     let mut guard = state.browse.write();
                     let Some(session) = guard.as_mut() else {

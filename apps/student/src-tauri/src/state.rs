@@ -98,15 +98,6 @@ pub struct RemoteControl {
     pub started_at: i64,
 }
 
-/// Aktif ders oturumu.
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ActiveSession {
-    pub session_id: Uuid,
-    pub teacher_name: String,
-    pub class_name: String,
-    pub started_at: i64,
-}
 
 /// Ekran paylaşımının güncel durumu.
 ///
@@ -159,7 +150,6 @@ pub struct AppState {
     pub status: RwLock<ConnectionStatus>,
     pub teachers: RwLock<HashMap<Uuid, DiscoveredTeacher>>,
     pub notices: RwLock<Vec<ReceivedNotice>>,
-    pub session: RwLock<Option<ActiveSession>>,
     /// Öğretmen ekranı yayını; açıkken tam ekran pencere gösterilir.
     pub broadcast: RwLock<Option<ActiveBroadcast>>,
     /// Öğretmen ekranının alınan bölgeleri.

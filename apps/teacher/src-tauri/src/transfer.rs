@@ -25,6 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
+use openclass_protocol::control::FileDestination;
 use openclass_protocol::ServerMessage;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -84,6 +85,8 @@ pub fn send(
     state: Arc<AppState>,
     path: PathBuf,
     targets: Vec<Uuid>,
+    destination: FileDestination,
+    subpath: Option<String>,
 ) -> Result<(Uuid, String, u64)> {
     let meta =
         std::fs::metadata(&path).with_context(|| format!("dosya okunamadı: {}", path.display()))?;
@@ -137,6 +140,8 @@ pub fn send(
         size,
         sha256,
         targets,
+        destination,
+        subpath,
     ));
 
     Ok((transfer_id, name, size))
@@ -170,6 +175,8 @@ async fn run(
     size: u64,
     sha256: [u8; 32],
     targets: Vec<Uuid>,
+    destination: FileDestination,
+    subpath: Option<String>,
 ) {
     tracing::info!(%transfer_id, %name, size, hedef = targets.len(), "dosya gönderimi başlıyor");
 
@@ -192,6 +199,8 @@ async fn run(
                 name: name.clone(),
                 size,
                 sha256,
+                destination,
+                subpath: subpath.clone(),
             })
             .await
             .is_err()

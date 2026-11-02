@@ -74,9 +74,6 @@ pub fn run() {
             commands::start_pairing,
             commands::cancel_pairing,
             commands::get_pairing,
-            commands::start_session,
-            commands::end_session,
-            commands::get_session,
             commands::start_screen_streams,
             commands::stop_screen_streams,
             commands::focus_device,
@@ -107,6 +104,8 @@ pub fn run() {
             commands::browse_fetch,
             commands::get_browse,
             commands::open_downloads_dir,
+            commands::get_download_root,
+            commands::set_download_root,
             frame_base_url,
         ])
         .setup({
@@ -114,7 +113,6 @@ pub fn run() {
             move |app| {
                 *state.app.write() = Some(app.handle().clone());
                 spawn_network_services(Arc::clone(&state));
-                open_initial_session(Arc::clone(&state));
                 Ok(())
             }
         })
@@ -128,32 +126,6 @@ pub fn run() {
                 cancel.cancel();
             }
         });
-}
-
-/// Konsol açılışında ders oturumunu başlatır.
-///
-/// Öğretmenin konsolu açıp ayrıca "Dersi Başlat" demesi gereksiz bir
-/// adımdı: konsolu açan öğretmen zaten dersi yönetmek istiyor ve o düğmeye
-/// basılmadan ekran izleme, kilit ve uzaktan kontrol kapalı kalıyordu.
-///
-/// Oturum kavramı kaldırılmadı, yalnızca kendiliğinden açılıyor. Denetim
-/// kaydı, "ders bitti" bildirimi ve kilit/kontrolün oturuma bağlı olması
-/// (bağlantı kopunca veya ders bitince düşmesi) aynen korunur. Öğretmen
-/// "Dersi Bitir" ile her şeyi bilinçli olarak durdurabilir.
-fn open_initial_session(state: Arc<state::AppState>) {
-    tauri::async_runtime::spawn(async move {
-        match commands::open_session(&state, None).await {
-            Ok(session) => tracing::info!(
-                oturum = %session.session_id,
-                sinif = %session.class_name,
-                "ders oturumu konsol açılışında başlatıldı"
-            ),
-            Err(err) => tracing::error!(
-                error = %format!("{err:#}"),
-                "açılışta ders oturumu başlatılamadı"
-            ),
-        }
-    });
 }
 
 /// Arayüzün ekran karelerini çekeceği taban adres.
@@ -197,11 +169,11 @@ fn bootstrap() -> Result<Arc<AppState>> {
         config_path,
         pairing: RwLock::new(None),
         test_pairing_code: testing::fixed_pairing_code(),
-        session: RwLock::new(None),
         app: RwLock::new(None),
         transfers: RwLock::new(HashMap::new()),
         broadcast_fallback: RwLock::new(std::collections::HashSet::new()),
         browse: RwLock::new(None),
+        download_root: RwLock::new(None),
         controlled_device: RwLock::new(None),
         broadcast: RwLock::new(None),
         broadcast_keyframe_requested: std::sync::atomic::AtomicBool::new(false),

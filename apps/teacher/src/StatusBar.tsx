@@ -15,7 +15,6 @@ export type ListMode = "thumbnails" | "details";
 
 export function StatusBar({
   className,
-  sessionActive,
   connected,
   selected,
   inGroup,
@@ -30,7 +29,6 @@ export function StatusBar({
   onSelectHelp,
 }: {
   className: string;
-  sessionActive: boolean;
   connected: number;
   selected: number;
   inGroup: number;
@@ -50,12 +48,6 @@ export function StatusBar({
       border-[var(--color-stroke)] bg-[var(--color-surface)] px-2 text-[11px]
       text-[var(--color-text-2)]">
       <span className="flex items-center gap-1.5">
-        <span
-          className={`size-[7px] rounded-full ${
-            sessionActive ? "bg-[var(--color-ok)]" : "bg-[var(--color-text-3)]"
-          }`}
-          title={sessionActive ? "Ders oturumu açık" : "Ders oturumu kapalı"}
-        />
         <strong className="font-semibold text-[var(--color-text)]">{className}</strong>
       </span>
 

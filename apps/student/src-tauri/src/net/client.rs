@@ -30,7 +30,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::PairedTeacher;
 use crate::net::pinned_tls::PinnedFingerprintVerifier;
-use crate::state::{ActiveSession, AppState, ConnectionStatus, ReceivedNotice, SharingState};
+use crate::state::{AppState, ConnectionStatus, ReceivedNotice, SharingState};
 use openclass_screen::CaptureSession;
 use openclass_screen::TileEncoder;
 
@@ -119,7 +119,6 @@ pub async fn run(state: Arc<AppState>, cancel: CancellationToken) {
         state.stop_remote_control();
         state.unlock_screen();
         state.stop_browsing();
-        *state.session.write() = None;
 
         if cancel.is_cancelled() {
             return;
@@ -301,6 +300,9 @@ async fn handshake(
     host: &str,
     port: u16,
 ) -> Result<String> {
+    // Kilit `await` üzerinden taşınmasın diye oda adı baştan kopyalanır.
+    let room = state.config.read().room.clone();
+
     send(
         sink,
         &ClientMessage::Hello {
@@ -309,6 +311,7 @@ async fn handshake(
             hostname: state.hostname.clone(),
             app_version: openclass_common::APP_VERSION.to_string(),
             public_key: state.identity.public_key().to_vec(),
+            room,
         },
     )
     .await?;
@@ -521,50 +524,7 @@ async fn handle_server_message(
     frame_timer: &mut tokio::time::Interval,
 ) -> Result<()> {
     match msg {
-        ServerMessage::SessionStart {
-            session_id,
-            teacher_name,
-            class_name,
-        } => {
-            tracing::info!(%session_id, %class_name, "ders oturumu başladı");
-            let session = ActiveSession {
-                session_id,
-                teacher_name,
-                class_name,
-                started_at: unix_now(),
-            };
-            *state.session.write() = Some(session.clone());
-            state.emit("session-changed", Some(session));
-        }
-
-        ServerMessage::SessionEnd { session_id } => {
-            tracing::info!(%session_id, "ders oturumu bitti, yayın durduruluyor");
-            // Ders bitince kontrol, kilit ve gezgin de biter; bu bir güvenlik
-            // kuralıdır.
-            state.stop_remote_control();
-            state.unlock_screen();
-            state.stop_browsing();
-            if let Some(s) = ctx.stream.take() {
-                s.stop(state);
-            }
-            *frame_timer = idle_timer();
-            *state.session.write() = None;
-            state.emit("session-changed", Option::<ActiveSession>::None);
-        }
-
         ServerMessage::StartScreenStream { stream_id, quality } => {
-            // Ders oturumu yoksa yayın başlatılmaz. Öğretmen tarafı da
-            // engelliyor; bu ikinci savunma hattıdır.
-            if state.session.read().is_none() {
-                tracing::warn!("oturum yokken ekran yayını istendi, reddedildi");
-                let _ = tx
-                    .send(ClientMessage::ScreenError {
-                        stream_id,
-                        reason: "Aktif ders oturumu olmadan ekran paylaşılmaz.".into(),
-                    })
-                    .await;
-                return Ok(());
-            }
 
             match ScreenStream::start(stream_id, quality, &state.hostname) {
                 Ok(s) => {
@@ -617,6 +577,8 @@ async fn handle_server_message(
             name,
             size,
             sha256,
+            destination,
+            subpath,
         } => {
             // Yürüyen bir aktarım varsa yenisini kabul etmeyiz: öğretmen
             // dosyaları sırayla gönderir.
@@ -630,14 +592,25 @@ async fn handle_server_message(
                 return Ok(());
             }
 
-            match crate::transfer::Incoming::open(transfer_id, &name, size, sha256) {
+            match crate::transfer::Incoming::open(
+                transfer_id,
+                &name,
+                size,
+                sha256,
+                destination,
+                subpath.as_deref(),
+            ) {
                 Ok(incoming) => {
                     tracing::info!(%transfer_id, dosya = %incoming.name, size, "dosya alınıyor");
                     // Öğrenciye her zaman haber verilir; sessiz bırakma yok.
+                    let yer = match subpath.as_deref() {
+                        Some(alt) => format!("{}\\{}", destination.label(), alt),
+                        None => format!("{}\\OpenClass", destination.label()),
+                    };
                     state.show_notice(format!(
-                        "Öğretmeniniz size bir dosya gönderiyor: {} ({:.1} MB)",
+                        "Öğretmeniniz size bir dosya gönderiyor: {} ({:.1} MB) — {yer}",
                         incoming.name,
-                        size as f64 / 1_048_576.0
+                        size as f64 / 1_048_576.0,
                     ));
                     ctx.transfer = Some(incoming);
                     let _ = tx.send(ClientMessage::FileAccepted { transfer_id }).await;
@@ -735,10 +708,6 @@ async fn handle_server_message(
         }
 
         ServerMessage::BrowseStart { teacher_name } => {
-            if state.session.read().is_none() {
-                tracing::warn!("oturum yokken dosya gezgini istendi, reddedildi");
-                return Ok(());
-            }
             tracing::info!(%teacher_name, "uzak dosya gezgini açıldı");
             state.start_browsing(teacher_name);
         }
@@ -857,10 +826,6 @@ async fn handle_server_message(
         }
 
         ServerMessage::LockStudent { message } => {
-            if state.session.read().is_none() {
-                tracing::warn!("oturum yokken kilit istendi, reddedildi");
-                return Ok(());
-            }
             tracing::info!("ekran kilitlendi");
             state.lock_screen(message);
         }
@@ -946,10 +911,6 @@ async fn handle_server_message(
         ServerMessage::RemoteControlStart { teacher_name } => {
             if !crate::input::is_supported() {
                 tracing::warn!("uzaktan kontrol bu platformda desteklenmiyor");
-                return Ok(());
-            }
-            if state.session.read().is_none() {
-                tracing::warn!("oturum yokken uzaktan kontrol istendi, reddedildi");
                 return Ok(());
             }
             tracing::info!(%teacher_name, "uzaktan kontrol devralındı");

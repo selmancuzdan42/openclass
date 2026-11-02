@@ -61,7 +61,11 @@ pub fn roots() -> Vec<(String, PathBuf)> {
     }
 
     // Öğretmenin kendi gönderdiği dosyalar; geri almak isteyebilir.
-    if let Ok(inbox) = crate::transfer::inbox_dir() {
+    //
+    // Yalnızca varsayılan (Belgeler) kök ayrı bir giriş olarak eklenir.
+    // Masaüstü ve İndirilenler'e gönderilmiş dosyalar, o kökler zaten
+    // listede olduğu için kendi `OpenClass` alt klasörlerinden görülür.
+    if let Ok(inbox) = crate::transfer::inbox_dir(Default::default(), None) {
         if inbox.is_dir() && !out.iter().any(|(_, p)| *p == inbox) {
             out.push(("OpenClass".to_string(), inbox));
         }

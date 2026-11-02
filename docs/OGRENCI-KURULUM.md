@@ -15,19 +15,40 @@ Rename-Computer -NewName "LAB101" -Restart
 
 Uygulama bilgisayar adını otomatik okur; elle girmeniz gerekmez.
 
-## Eşleştirme (bilgisayar başına bir kez)
+## İlk kurulum (bilgisayar başına bir kez)
 
-İlk açılışta **yapılandırma penceresi** gelir. Eşleştirilmiş bir cihazda bu
-pencere açılmaz; ajan doğrudan tepside çalışmaya başlar.
+İlk açılışta **kurulum sihirbazı** gelir. İki adımdır.
+
+### 1. adım — laboratuvar adı
+
+Bu bilgisayarın bulunduğu laboratuvarın adını yazın, örneğin `Lab 1` veya
+`201 Nolu Atölye`. Öğretmen konsolu bilgisayarları bu ada göre gruplar, bu
+yüzden **aynı laboratuvardaki bütün bilgisayarlara aynı adı** yazın.
+
+Ad yalnızca listelemeye yarar; yetki kararında kullanılmaz. Öğretmen yine de
+her bilgisayarı tek tek eşleştirmek zorundadır.
+
+**Şimdilik atla**'ya basarsanız oda adı boş kalır — öğretmen listesinde "—"
+görünür. Sonradan yapılandırma penceresindeki **Laboratuvar / oda** kartından
+girebilirsiniz.
+
+### 2. adım — eşleştirme
 
 1. Öğretmen konsolunda **Cihaz Eşleştir**'e basın; ekranda 6 haneli bir kod belirir.
-2. Öğrenci bilgisayarındaki yapılandırma penceresinde öğretmeni listeden seçin.
+2. Öğrenci bilgisayarında öğretmeni listeden seçin.
    - Liste boşsa öğretmenin IP adresini **adres** kutusuna yazın.
 3. Kodu girip **Eşleştir ve Bağlan**'a basın.
 4. **Kapat**'a basın. Pencere gizlenir, ajan tepside çalışmaya devam eder.
 
 Eşleştirme kalıcıdır. IP adresi değişse veya bilgisayar yeniden başlatılsa
 bile tekrarlanmaz.
+
+Sihirbaz yarıda kapatılırsa yalnızca kaydedilmiş adımlar kalır: oda adı diske
+yazılmıştır, eşleştirme yazılmamıştır.
+
+> **0.1.0'dan yükseltenler:** zaten eşleştirilmiş bir cihazda sihirbaz
+> açılmaz. Oda adı boş kalır; girmek isterseniz yapılandırma penceresini
+> tepsi simgesinden açın.
 
 ## Öğrencinin gördüğü tek şey: tepsi simgesi
 
@@ -72,13 +93,13 @@ penceresindedir.
 
 ## Ekran paylaşımı ne zaman açılır?
 
-Ekran **yalnızca** iki koşul birlikte sağlandığında paylaşılır:
+Ekran, öğretmen konsolu açık ve bu bilgisayar ona bağlıyken paylaşılır.
 
-1. Öğretmen bir ders oturumu başlatmış olmalı,
-2. Öğretmen o bilgisayarın ekranını açıkça göstermeyi seçmiş olmalı.
-
-Paylaşım başladığında tepsi simgesi yeşil noktaya döner. Ders bittiğinde
-paylaşım kendiliğinden durur ve simge eski hâline geri gelir.
+Paylaşım başladığında tepsi simgesi yeşil noktaya döner ve "EKRANINIZ
+PAYLAŞILIYOR" göstergesi çıkar. **Bu gösterge kapatılamaz** — paylaşımın
+gizlice yapılmasını engelleyen tek şey odur. Öğretmen konsolu kapandığında
+veya bağlantı koptuğunda paylaşım kendiliğinden durur, simge eski hâline
+döner.
 
 **Simgeyi gizleyen bir seçenek yoktur.** Bazı ticari yazılımlarda bulunan
 "sessiz mod" benzeri gizleme özelliği OpenClass'ta bilinçli olarak

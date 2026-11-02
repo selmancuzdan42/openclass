@@ -7,12 +7,12 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use openclass_protocol::control::{ServerMessage, StreamQuality};
+use openclass_protocol::control::{FileDestination, ServerMessage, StreamQuality};
 use tauri::State;
 use uuid::Uuid;
 
 use crate::db::{AuditEntry, AuditKind};
-use crate::state::{ActivePairing, AppState, ClassSession, DeviceView};
+use crate::state::{ActivePairing, AppState, DeviceView};
 
 /// Komut hatası. Arayüze düz metin olarak iner.
 pub type CmdResult<T> = Result<T, String>;
@@ -153,134 +153,6 @@ pub fn get_pairing(state: State<'_, Arc<AppState>>) -> CmdResult<Option<PairingI
     }))
 }
 
-// ---------------------------------------------------------------- oturum
-
-/// Ders oturumunu başlatır.
-#[tauri::command]
-pub async fn start_session(
-    state: State<'_, Arc<AppState>>,
-    class_name: Option<String>,
-) -> CmdResult<ClassSession> {
-    if state.session_active() {
-        return Err("Zaten açık bir ders oturumu var.".into());
-    }
-    open_session(&state, class_name)
-        .await
-        .map_err(|e| fail("Oturum başlatılamadı", e))
-}
-
-/// Ders oturumunu açar.
-///
-/// Hem `start_session` komutu hem de konsol açılışındaki kendiliğinden
-/// başlatma bunu kullanır; iki yerde aynı mantığı tutmak kaçınılmaz
-/// biçimde ayrışırdı.
-pub async fn open_session(
-    state: &Arc<AppState>,
-    class_name: Option<String>,
-) -> anyhow::Result<ClassSession> {
-    let class_name = class_name
-        .map(|n| n.trim().to_string())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| state.config.read().class_name.clone());
-
-    let session = ClassSession {
-        session_id: Uuid::new_v4(),
-        class_name: class_name.clone(),
-        started_at: crate::db::now(),
-    };
-
-    state.db.start_session(session.session_id, &class_name)?;
-    state
-        .db
-        .audit(AuditKind::SessionStarted, None, Some(&class_name));
-    *state.session.write() = Some(session.clone());
-
-    let teacher_name = state.config.read().teacher_name.clone();
-    // Hâlihazırda bağlı cihazlara oturumu bildir ve ekran akışlarını başlat.
-    // Yeni bağlanan cihazların akışı `net::server` tarafında başlar; ders
-    // yeniden başlatıldığında bağlı kalanlar da aynı şekilde davranmalı.
-    let quality = StreamQuality::PREVIEW;
-    for (device_id, tx) in state.registry.all_senders() {
-        if tx
-            .send(ServerMessage::SessionStart {
-                session_id: session.session_id,
-                teacher_name: teacher_name.clone(),
-                class_name: class_name.clone(),
-            })
-            .await
-            .is_err()
-        {
-            tracing::warn!(%device_id, "oturum başlangıcı bildirilemedi");
-            continue;
-        }
-
-        if tx
-            .send(ServerMessage::StartScreenStream {
-                stream_id: 1,
-                quality,
-            })
-            .await
-            .is_ok()
-        {
-            state.registry.update_flags(device_id, |f| {
-                f.streaming = true;
-                f.quality = Some(quality);
-            });
-        }
-    }
-
-    state.emit("session-changed", Some(session.clone()));
-    state.notify_devices_changed();
-    tracing::info!(oturum = %session.session_id, %class_name, "ders oturumu başladı");
-    Ok(session)
-}
-
-/// Ders oturumunu bitirir ve **tüm** ekran yayınlarını durdurur.
-#[tauri::command]
-pub async fn end_session(state: State<'_, Arc<AppState>>) -> CmdResult<()> {
-    let Some(session) = state.session.write().take() else {
-        return Err("Açık bir ders oturumu yok.".into());
-    };
-
-    for (device_id, tx) in state.registry.all_senders() {
-        let _ = tx
-            .send(ServerMessage::StopScreenStream { stream_id: 0 })
-            .await;
-        if tx
-            .send(ServerMessage::SessionEnd {
-                session_id: session.session_id,
-            })
-            .await
-            .is_err()
-        {
-            tracing::warn!(%device_id, "oturum bitişi bildirilemedi");
-        }
-    }
-
-    // Oturum bitti: kontrol ve kilitler de düşer. Öğrenci tarafı `SessionEnd`
-    // ile ikisini birden bırakıyor; burada öğretmenin kendi durumu temizlenir.
-    *state.controlled_device.write() = None;
-    state.emit("control-changed", Option::<String>::None);
-
-    state.registry.clear_all_streaming();
-    state
-        .db
-        .end_session(session.session_id)
-        .map_err(|e| fail("Oturum kapatılamadı", e))?;
-    state
-        .db
-        .audit(AuditKind::SessionEnded, None, Some(&session.class_name));
-
-    state.emit("session-changed", Option::<ClassSession>::None);
-    state.notify_devices_changed();
-    tracing::info!(oturum = %session.session_id, "ders oturumu bitti");
-    Ok(())
-}
-
-#[tauri::command]
-pub fn get_session(state: State<'_, Arc<AppState>>) -> CmdResult<Option<ClassSession>> {
-    Ok(state.session.read().clone())
-}
 
 // ----------------------------------------------------------- ekran yayını
 
@@ -305,17 +177,14 @@ impl From<QualityKind> for StreamQuality {
 
 /// Seçili cihazların ekran yayınını başlatır.
 ///
-/// Aktif bir ders oturumu yoksa reddedilir — ekran izleme yalnızca
-/// yetkilendirilmiş ve açıkça başlatılmış derslerde yapılır.
+/// Yayın öğrencide **her zaman görünür**: tepsi simgesi değişir ve
+/// "EKRANINIZ PAYLAŞILIYOR" göstergesi çıkar.
 #[tauri::command]
 pub async fn start_screen_streams(
     state: State<'_, Arc<AppState>>,
     device_ids: Vec<String>,
     quality: QualityKind,
 ) -> CmdResult<u32> {
-    if !state.session_active() {
-        return Err("Ekran izlemek için önce ders oturumunu başlatın.".into());
-    }
     let quality: StreamQuality = quality.into();
     let mut started = 0u32;
 
@@ -375,9 +244,6 @@ pub async fn stop_screen_streams(
 /// Bir ekranı büyütür: o cihaz yüksek kaliteye, diğerleri önizlemeye geçer.
 #[tauri::command]
 pub async fn focus_device(state: State<'_, Arc<AppState>>, device_id: String) -> CmdResult<()> {
-    if !state.session_active() {
-        return Err("Ekran izlemek için önce ders oturumunu başlatın.".into());
-    }
     let focused = parse_id(&device_id)?;
 
     for (id, tx) in state.registry.all_senders() {
@@ -513,6 +379,10 @@ pub struct ServerInfo {
     pub online_count: usize,
     pub extra_discovery_hosts: Vec<String>,
     pub setup_completed: bool,
+    /// Konsolun yönettiği laboratuvar; `None` ise bütün cihazlar listelenir.
+    pub active_room: Option<String>,
+    /// Konsolun süzdüğü bilgisayar adı ön eki.
+    pub active_prefix: Option<String>,
     /// Ağ servisleri başlatılamadıysa sebebi; arayüz bunu kalıcı gösterir.
     pub network_error: Option<String>,
 }
@@ -531,6 +401,8 @@ pub fn get_server_info(state: State<'_, Arc<AppState>>) -> CmdResult<ServerInfo>
         online_count: state.registry.online_count(),
         extra_discovery_hosts: cfg.extra_discovery_hosts.clone(),
         setup_completed: cfg.setup_completed,
+        active_room: cfg.active_room.clone(),
+        active_prefix: cfg.active_prefix.clone(),
         network_error: state.network_error.read().clone(),
     })
 }
@@ -565,6 +437,8 @@ pub fn update_settings(
     class_name: Option<String>,
     extra_discovery_hosts: Option<Vec<String>>,
     setup_completed: Option<bool>,
+    active_room: Option<String>,
+    active_prefix: Option<String>,
 ) -> CmdResult<()> {
     {
         let mut cfg = state.config.write();
@@ -589,6 +463,24 @@ pub fn update_settings(
         }
         if let Some(done) = setup_completed {
             cfg.setup_completed = done;
+        }
+        // Boş metin "bütün laboratuvarlar" demektir; `None` ile aynı sonucu
+        // verir ama arayüzün seçimi açıkça temizlemesine izin verir.
+        if let Some(room) = active_room {
+            let room = room.trim();
+            cfg.active_room = if room.is_empty() {
+                None
+            } else {
+                Some(room.to_string())
+            };
+        }
+        if let Some(prefix) = active_prefix {
+            let prefix = prefix.trim().to_ascii_uppercase();
+            cfg.active_prefix = if prefix.is_empty() {
+                None
+            } else {
+                Some(prefix)
+            };
         }
     }
     state
@@ -675,15 +567,60 @@ pub fn suggest_groups(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<GroupSug
         .registry
         .build_views(&state.db)
         .map_err(|e| fail("Cihaz listesi okunamadı", e))?;
+    let odalar: Vec<String> = devices.iter().filter_map(|d| d.room.clone()).collect();
     let hostnames: Vec<String> = devices.into_iter().map(|d| d.hostname).collect();
-    Ok(derive_group_suggestions(&hostnames))
+
+    let mut out = derive_room_suggestions(&odalar);
+    out.extend(derive_group_suggestions(&hostnames));
+    Ok(out)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroupSuggestion {
+    /// Bilgisayar adı ön eki. Oda tabanlı öneride boştur.
     pub prefix: String,
     pub device_count: usize,
+    /// Öneri bir odadan geliyorsa oda adı.
+    ///
+    /// Oda önerileri öncelikli: öğrencinin kendi bildirdiği değer, okulun
+    /// bilgisayar adı disiplinine bağlı olmayan tek ölçüttür.
+    pub room: Option<String>,
+}
+
+/// Bildirilen oda adlarından öneri üretir.
+///
+/// Ön ek tahmininin tersine burada tahmin yok: oda adı öğrencinin kendi
+/// girdisidir. Tek cihazlı odalar da önerilir — bir laboratuvarda şu an tek
+/// makine açık olabilir, bu onun oda olmadığını göstermez.
+fn derive_room_suggestions(rooms: &[String]) -> Vec<GroupSuggestion> {
+    use std::collections::BTreeMap;
+
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for raw in rooms {
+        let oda = raw.trim();
+        if oda.is_empty() {
+            continue;
+        }
+        *counts.entry(oda.to_string()).or_insert(0) += 1;
+    }
+
+    let mut out: Vec<_> = counts
+        .into_iter()
+        .map(|(oda, device_count)| GroupSuggestion {
+            prefix: String::new(),
+            device_count,
+            room: Some(oda),
+        })
+        .collect();
+
+    // Çok cihazlı oda önce; eşitlikte ada göre kararlı sıra.
+    out.sort_by(|a, b| {
+        b.device_count
+            .cmp(&a.device_count)
+            .then_with(|| a.room.cmp(&b.room))
+    });
+    out
 }
 
 /// [`suggest_groups`] için saf yardımcı — test edilebilir olsun diye ayrı.
@@ -725,6 +662,7 @@ fn derive_group_suggestions(hostnames: &[String]) -> Vec<GroupSuggestion> {
         .map(|(prefix, device_count)| GroupSuggestion {
             prefix,
             device_count,
+            room: None,
         })
         .collect();
 
@@ -878,9 +816,6 @@ pub async fn start_remote_control(
     state: State<'_, Arc<AppState>>,
     device_id: String,
 ) -> CmdResult<()> {
-    if !state.session_active() {
-        return Err("Uzaktan kontrol için önce ders oturumunu başlatın.".into());
-    }
     let id = parse_id(&device_id)?;
     let Some(tx) = state.registry.sender(id) else {
         return Err("Cihaz bağlı değil.".into());
@@ -987,9 +922,6 @@ pub async fn lock_devices(
     device_ids: Vec<String>,
     message: String,
 ) -> CmdResult<usize> {
-    if !state.session_active() {
-        return Err("Ekran kilitlemek için önce ders oturumunu başlatın.".into());
-    }
 
     let message = message.trim().to_string();
     let mut sent = 0usize;
@@ -1058,17 +990,18 @@ pub async fn unlock_devices(
 ///
 /// Dosya TLS kanalından parçalı gönderilir ve alıcı SHA-256 özetiyle
 /// doğrular. Öğrenciye her zaman bildirilir — sessiz bırakma yoktur.
-/// Hedef klasörü öğretmen seçemez; dosya öğrencinin Belgeler klasöründeki
-/// `OpenClass` dizinine yazılır.
+///
+/// Öğretmen hedef **kökü** seçebilir (`documents` · `desktop` · `downloads`)
+/// ama serbest yol gönderemez; dosya her zaman o kökün altındaki `OpenClass`
+/// klasörüne yazılır. Tanınmayan bir değer gelirse Belgeler kullanılır.
 #[tauri::command]
 pub fn send_file(
     state: State<'_, Arc<AppState>>,
     device_ids: Vec<String>,
     path: String,
+    destination: Option<String>,
+    subpath: Option<String>,
 ) -> CmdResult<String> {
-    if !state.session_active() {
-        return Err("Dosya göndermek için önce ders oturumunu başlatın.".into());
-    }
     if device_ids.is_empty() {
         return Err("Dosya gönderilecek cihaz seçilmedi.".into());
     }
@@ -1078,10 +1011,22 @@ pub fn send_file(
         .map(|r| parse_id(r))
         .collect::<Result<_, _>>()?;
 
-    let (transfer_id, name, size) = crate::transfer::send(Arc::clone(&state), path.into(), targets)
-        .map_err(|e| format!("{e}"))?;
+    // Arayüzden gelen metin kapalı bir kümeye çözülür; bilinmeyen değer
+    // hataya değil varsayılana düşer, böylece eski arayüz de çalışır.
+    let destination = match destination.as_deref() {
+        Some("desktop") => FileDestination::Desktop,
+        Some("downloads") => FileDestination::Downloads,
+        _ => FileDestination::Documents,
+    };
 
-    tracing::info!(%transfer_id, %name, size, "dosya gönderimi kuyruğa alındı");
+    let (transfer_id, name, size) =
+        crate::transfer::send(Arc::clone(&state), path.into(), targets, destination, subpath)
+            .map_err(|e| format!("{e}"))?;
+
+    tracing::info!(
+        %transfer_id, %name, size, hedef = destination.label(),
+        "dosya gönderimi kuyruğa alındı"
+    );
     Ok(transfer_id.to_string())
 }
 
@@ -1110,9 +1055,6 @@ pub fn clear_finished_transfers(state: State<'_, Arc<AppState>>) -> CmdResult<()
 /// görünür bir gösterge durur. Aynı anda tek öğrenci gezilebilir.
 #[tauri::command]
 pub async fn open_browser(state: State<'_, Arc<AppState>>, device_id: String) -> CmdResult<()> {
-    if !state.session_active() {
-        return Err("Dosya gezgini için önce ders oturumunu başlatın.".into());
-    }
     let id = parse_id(&device_id)?;
     let Some(tx) = state.registry.sender(id) else {
         return Err("Cihaz bağlı değil.".into());
@@ -1268,13 +1210,65 @@ pub fn get_browse(state: State<'_, Arc<AppState>>) -> CmdResult<Option<crate::br
 
 /// İndirilen dosyaların klasörünü işletim sisteminde açar.
 #[tauri::command]
-pub fn open_downloads_dir(app: tauri::AppHandle) -> CmdResult<()> {
+pub fn open_downloads_dir(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> CmdResult<()> {
     use tauri_plugin_opener::OpenerExt;
 
-    let dir = crate::browse::downloads_dir().map_err(|e| fail("Klasör bulunamadı", e))?;
+    let kok = state.download_root.read().clone();
+    let dir = crate::browse::downloads_dir(kok.as_deref())
+        .map_err(|e| fail("Klasör bulunamadı", e))?;
     app.opener()
         .open_path(dir.to_string_lossy().to_string(), None::<&str>)
         .map_err(|e| format!("Klasör açılamadı: {e}"))
+}
+
+/// Öğretmenin seçtiği indirme klasörünü döner (seçilmemişse varsayılan).
+#[tauri::command]
+pub fn get_download_root(state: State<'_, Arc<AppState>>) -> CmdResult<String> {
+    let kok = state.download_root.read().clone();
+    let dir =
+        crate::browse::downloads_dir(kok.as_deref()).map_err(|e| fail("Klasör bulunamadı", e))?;
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+/// İndirme klasörünü ayarlar; `None` varsayılana döner.
+///
+/// Klasör öğretmenin kendi makinesindedir, bu yüzden serbest yol kabul
+/// edilir. Var olduğu ve klasör olduğu burada doğrulanır — yanlış yol
+/// aktarımın ortasında değil, seçim anında hata vermeli.
+#[tauri::command]
+pub fn set_download_root(
+    state: State<'_, Arc<AppState>>,
+    path: Option<String>,
+) -> CmdResult<String> {
+    match path {
+        Some(p) if !p.trim().is_empty() => {
+            let yol = std::path::PathBuf::from(p);
+            if !yol.is_dir() {
+                return Err(format!("Klasör bulunamadı: {}", yol.display()));
+            }
+            // Yazılabilirlik sınaması: salt okunur bir klasör seçilirse
+            // indirme ilk parçada değil, burada hata verir.
+            let deneme = yol.join(".openclass-yazma-denemesi");
+            std::fs::write(&deneme, b"")
+                .map_err(|e| format!("Bu klasöre yazılamıyor: {e}"))?;
+            let _ = std::fs::remove_file(&deneme);
+
+            let gosterim = yol.to_string_lossy().into_owned();
+            *state.download_root.write() = Some(yol);
+            tracing::info!(klasor = %gosterim, "indirme klasörü değişti");
+            Ok(gosterim)
+        }
+        _ => {
+            *state.download_root.write() = None;
+            let dir = crate::browse::downloads_dir(None)
+                .map_err(|e| fail("Klasör bulunamadı", e))?;
+            tracing::info!("indirme klasörü varsayılana döndü");
+            Ok(dir.to_string_lossy().into_owned())
+        }
+    }
 }
 
 fn emit_browse(state: &Arc<AppState>) {

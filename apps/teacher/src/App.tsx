@@ -7,8 +7,8 @@ import {
   CheckSquare,
   ClipboardList,
   Hand,
+  FileDown,
   FileUp,
-  FolderOpen,
   LayoutGrid,
   Link2,
   ListChecks,
@@ -20,26 +20,25 @@ import {
   MonitorOff,
   MousePointerClick,
   Moon,
-  Play,
   RotateCcw,
   Rows3,
   ScreenShare,
   ScreenShareOff,
   Settings as SettingsIcon,
   ShieldOff,
-  Square,
   SquareDashed,
   Sun,
   UserRoundCog,
   Wifi,
 } from "lucide-react";
 
-import { api, AUDIT_LABELS, formatDuration, formatTime } from "./api";
+import { api, AUDIT_LABELS, formatTime } from "./api";
 import {
   AuditDialog,
   BroadcastDialog,
   FocusDialog,
   LockDialog,
+  RoomPickerDialog,
   GroupDialog,
   MessageDialog,
   PairingDialog,
@@ -66,9 +65,9 @@ import { useTheme } from "./useTheme";
 import type {
   AuditEntry,
   BroadcastInfo,
-  ClassSession,
   DeviceGroup,
   DeviceView,
+  FileDestination,
   FrameEvent,
   HelpEvent,
   PairingInfo,
@@ -105,7 +104,6 @@ function Console() {
   // Veri
   const [devices, setDevices] = useState<DeviceView[]>([]);
   const [groups, setGroups] = useState<DeviceGroup[]>([]);
-  const [session, setSession] = useState<ClassSession | null>(null);
   const [info, setInfo] = useState<ServerInfo | null>(null);
   const [frameBaseUrl, setFrameBaseUrl] = useState("");
   const [broadcast, setBroadcast] = useState<BroadcastInfo | null>(null);
@@ -113,6 +111,8 @@ function Console() {
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
   const [transfersOpen, setTransfersOpen] = useState(false);
+  /** Seçilmiş ama hedefi henüz sorulmamış dosya yolu. */
+  const [pendingFile, setPendingFile] = useState<string | null>(null);
   const [browserOpen, setBrowserOpen] = useState(false);
 
   // Seçim ve filtre
@@ -160,7 +160,6 @@ function Console() {
   useEffect(() => {
     void (async () => {
       setFrameBaseUrl(await api.frameBaseUrl().catch(() => ""));
-      setSession(await api.getSession().catch(() => null));
       setBroadcast(await api.getBroadcast().catch(() => null));
       await Promise.all([refreshInfo(), refreshDevices(), refreshGroups()]);
     })();
@@ -172,7 +171,6 @@ function Console() {
       listen("groups-changed", () => void refreshGroups()),
       listen<BroadcastInfo | null>("broadcast-changed", (e) => setBroadcast(e.payload)),
       listen<string | null>("control-changed", (e) => setControlled(e.payload)),
-      listen<ClassSession | null>("session-changed", (e) => setSession(e.payload)),
       listen("pairing-changed", () => void api.getPairing().then(setPairing).catch(() => {})),
       listen<string>("network-error", (e) => show("error", e.payload)),
       listen<HelpEvent>("help-request", (e) => {
@@ -224,29 +222,39 @@ function Console() {
   /**
    * Grup sekmesi ve arama kutusu birlikte uygulanır.
    *
-   * Arama hem bilgisayar adında (ön ek) hem IP adresinde yapılır; öğretmen
-   * hangisini yazdığını belirtmek zorunda değil.
+   * Arama bilgisayar adında (ön ek), oda adında ve IP adresinde yapılır;
+   * öğretmen hangisini yazdığını belirtmek zorunda değil.
    */
   const visible = useMemo(() => {
-    const prefix = groupFilter?.prefix.toUpperCase() ?? "";
     const search = appliedQuery.trim().toUpperCase();
+    const oda = info?.activeRoom?.trim().toUpperCase() ?? "";
+    const onek = info?.activePrefix?.trim().toUpperCase() ?? "";
     return devices.filter((d) => {
-      const host = d.hostname.toUpperCase();
-      if (!host.startsWith(prefix)) return false;
+      // Laboratuvar seçiliyse yalnızca o odanın bilgisayarları listelenir.
+      // Odası bilinmeyen cihazlar dışarıda kalır: hangi laboratuvarda
+      // oldukları bilinmediği için "bu odada" demek doğru olmaz.
+      if (oda && (d.room ?? "").trim().toUpperCase() !== oda) return false;
+      // Ön ek süzmesi oda süzmesinden bağımsızdır; ikisi birlikte verilirse
+      // ikisi birden uygulanır.
+      if (onek && !d.hostname.toUpperCase().startsWith(onek)) return false;
+      if (!inGroup(d, groupFilter)) return false;
       if (!search) return true;
-      return host.startsWith(search) || (d.address ?? "").toUpperCase().includes(search);
+      return (
+        d.hostname.toUpperCase().startsWith(search) ||
+        (d.room ?? "").toUpperCase().includes(search) ||
+        (d.address ?? "").toUpperCase().includes(search)
+      );
     });
-  }, [devices, groupFilter, appliedQuery]);
+  }, [devices, groupFilter, appliedQuery, info?.activeRoom, info?.activePrefix]);
 
   const groupTabs: GroupTab[] = useMemo(() => {
-    const count = (prefix: string) => {
-      const p = prefix.toUpperCase();
-      const members = devices.filter((d) => d.hostname.toUpperCase().startsWith(p));
+    const count = (group: DeviceGroup | null) => {
+      const members = devices.filter((d) => inGroup(d, group));
       return { total: members.length, online: members.filter((d) => d.online).length };
     };
     return [
-      { group: null, ...count("") },
-      ...groups.map((g) => ({ group: g, ...count(g.prefix) })),
+      { group: null, ...count(null) },
+      ...groups.map((g) => ({ group: g, ...count(g) })),
     ];
   }, [devices, groups]);
 
@@ -295,7 +303,7 @@ function Console() {
 
   async function openFocus(deviceId: string) {
     setFocused(deviceId);
-    if (session) await guard(api.focusDevice(deviceId));
+    await guard(api.focusDevice(deviceId));
   }
 
   async function closeFocus() {
@@ -303,14 +311,16 @@ function Console() {
     // öğrenci için tehlikeli olurdu.
     if (controlled) await api.stopRemoteControl().catch(() => {});
     setFocused(null);
-    if (session) await api.unfocusDevices().catch(() => {});
+    await api.unfocusDevices().catch(() => {});
   }
 
   /**
-   * Dosya seçer ve seçili öğrencilere gönderir.
+   * Dosya seçer, ardından hedef klasörü sorar.
    *
    * Seçim penceresi işletim sisteminin kendi iletişim kutusudur; öğretmen
-   * neyi gönderdiğini görür. Gönderim arka planda yürür, durum
+   * neyi gönderdiğini görür. Hedef kök ikinci adımda seçilir — her gönderimde
+   * sorulur, çünkü "ders notu Belgeler'e, uyarı dosyası Masaüstü'ne" gibi
+   * tercih dosyaya göre değişir. Gönderim arka planda yürür, durum
    * "Gönderimler" penceresinden izlenir.
    */
   async function pickAndSendFile() {
@@ -321,10 +331,39 @@ function Console() {
     });
     if (typeof picked !== "string") return;
 
+    const hedefler = actionTargets;
+    if (hedefler.length === 0) {
+      show("error", "Dosya gönderilecek bağlı cihaz yok.");
+      return;
+    }
+
+    // Hedef klasör ilk cihazın gezgininde seçilir. Taşınan değer köke göre
+    // göreli olduğu için aynı seçim bütün alıcılarda kendi kullanıcı
+    // klasörünün altına denk gelir.
+    const ilk = hedefler[0];
+    if (!ilk) return;
+    const ok = await guard(api.openBrowser(ilk.deviceId));
+    if (ok === undefined) return;
+
+    setPendingFile(picked);
+    setBrowserOpen(true);
+  }
+
+  /** Gezginde klasör seçildikten sonra gönderimi başlatır. */
+  async function sendPendingFile(
+    destination: FileDestination,
+    subpath: string | null,
+    shown: string,
+  ) {
+    const path = pendingFile;
+    setPendingFile(null);
+    setBrowserOpen(false);
+    if (!path) return;
+
     const ids = actionTargets.map((d) => d.deviceId);
-    const ok = await guard(api.sendFile(ids, picked));
+    const ok = await guard(api.sendFile(ids, path, destination, subpath));
     if (ok !== undefined) {
-      show("success", `Dosya ${ids.length} cihaza gönderiliyor.`);
+      show("success", `Dosya ${ids.length} cihaza gönderiliyor: ${shown}`);
       setTransfersOpen(true);
     }
   }
@@ -361,22 +400,6 @@ function Console() {
         key: "class",
         label: "Sınıf",
         groups: [
-          {
-            caption: "Ders",
-            commands: [
-              session
-                ? {
-                    label: "Dersi Bitir",
-                    icon: <Square size={18} />,
-                    onClick: () => void guard(api.endSession(), "Ders bitirildi, yayınlar durdu."),
-                  }
-                : {
-                    label: "Dersi Başlat",
-                    icon: <Play size={18} />,
-                    onClick: () => void guard(api.startSession(), "Ders başladı."),
-                  },
-            ],
-          },
           {
             caption: "Cihazlar",
             commands: [
@@ -436,22 +459,43 @@ function Console() {
             ],
           },
           {
-            caption: "İletişim",
+            // Gönderme ve alma aynı işin iki yönü; şeritte de yan yana
+            // durmaları gerekir. 0.1.0'da alma ("Dosya Gezgini") başka
+            // sekmedeydi ve kimse bulamıyordu.
+            caption: "Dosyalar",
             commands: [
               {
                 label: "Dosya Gönder",
                 icon: <FileUp size={18} />,
-                disabled: !session || actionTargets.length === 0,
-                title: session
-                  ? "Dosya öğrencinin Belgeler\\OpenClass klasörüne kaydedilir"
-                  : "Önce ders oturumunu başlatın",
+                disabled: actionTargets.length === 0,
+                title: "Seçili öğrencilere dosya gönder",
                 onClick: pickAndSendFile,
+              },
+              {
+                label: "Dosya Al",
+                icon: <FileDown size={18} />,
+                disabled: selectedDevices.length !== 1,
+                title:
+                  selectedDevices.length !== 1
+                    ? "Tek bir cihaz seçin"
+                    : "Öğrencinin dosyalarını görüntüle ve indir (yalnızca okuma)",
+                onClick: async () => {
+                  const device = selectedDevices[0];
+                  if (!device) return;
+                  const ok = await guard(api.openBrowser(device.deviceId));
+                  if (ok !== undefined) setBrowserOpen(true);
+                },
               },
               {
                 label: "Gönderimler",
                 icon: <ListChecks size={18} />,
                 onClick: () => setTransfersOpen(true),
               },
+            ],
+          },
+          {
+            caption: "İletişim",
+            commands: [
               {
                 label: "Mesaj Gönder",
                 icon: <MessageSquare size={18} />,
@@ -485,8 +529,7 @@ function Console() {
               {
                 label: "Ekranları Göster",
                 icon: <Monitor size={18} />,
-                disabled: !session || actionTargets.length === 0,
-                title: session ? undefined : "Önce ders oturumunu başlatın",
+                disabled: actionTargets.length === 0,
                 onClick: startStreams,
               },
               {
@@ -590,27 +633,6 @@ function Console() {
             ],
           },
           {
-            caption: "Dosyalar",
-            commands: [
-              {
-                label: "Dosya Gezgini",
-                icon: <FolderOpen size={18} />,
-                disabled: !session || selectedDevices.length !== 1,
-                title: !session
-                  ? "Önce ders oturumunu başlatın"
-                  : selectedDevices.length !== 1
-                    ? "Tek bir cihaz seçin"
-                    : "Öğrencinin dosyalarını görüntüleyin (yalnızca okuma)",
-                onClick: async () => {
-                  const device = selectedDevices[0];
-                  if (!device) return;
-                  const ok = await guard(api.openBrowser(device.deviceId));
-                  if (ok !== undefined) setBrowserOpen(true);
-                },
-              },
-            ],
-          },
-          {
             caption: "Sistem",
             commands: [
               {
@@ -629,7 +651,7 @@ function Console() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session, actionTargets.length, selectedDevices, helpDevices.length, listMode, selected.size, selectWhere, broadcast, info?.onlineCount],
+    [actionTargets.length, selectedDevices, helpDevices.length, listMode, selected.size, selectWhere, broadcast, info?.onlineCount],
   );
 
   const contextItems: (MenuItem | null)[] = menuDevice
@@ -643,7 +665,7 @@ function Console() {
         {
           label: menuDevice.streaming ? "Yayını durdur" : "Ekranı göster",
           icon: menuDevice.streaming ? <MonitorOff size={13} /> : <Monitor size={13} />,
-          disabled: !menuDevice.online || (!session && !menuDevice.streaming),
+          disabled: !menuDevice.online,
           onSelect: () => {
             if (menuDevice.streaming) {
               void guard(api.stopScreenStreams([menuDevice.deviceId]));
@@ -683,8 +705,8 @@ function Console() {
           onSelect: () => void guard(api.unlockDevices([menuDevice.deviceId])),
         },
         {
-          label: "Dosyalarını görüntüle",
-          icon: <FolderOpen size={13} />,
+          label: "Dosyalarını al",
+          icon: <FileDown size={13} />,
           disabled: !menuDevice.online,
           onSelect: async () => {
             const ok = await guard(api.openBrowser(menuDevice.deviceId));
@@ -752,18 +774,7 @@ function Console() {
         <span className="h-4 w-px bg-[var(--color-stroke-strong)]" />
 
         <span className="truncate text-[12px]">
-          {session ? (
-            <>
-              <strong className="font-semibold">{session.className}</strong>
-              <span className="ml-2 tabular-nums text-[var(--color-text-2)]">
-                {formatDuration(session.startedAt)}
-              </span>
-            </>
-          ) : (
-            <span className="text-[var(--color-text-2)]">
-              {info?.className ?? "Laboratuvar"} · ders kapalı
-            </span>
-          )}
+          <strong className="font-semibold">{info?.className ?? "Laboratuvar"}</strong>
         </span>
 
         <div className="ml-auto flex items-center gap-1.5">
@@ -781,18 +792,6 @@ function Console() {
             >
               <Hand size={12} /> {helpDevices.length} yardım talebi
             </button>
-          )}
-          {session ? (
-            <Button
-              tone="danger"
-              onClick={() => void guard(api.endSession(), "Ders bitirildi.")}
-            >
-              <Square size={12} /> Dersi Bitir
-            </Button>
-          ) : (
-            <Button tone="accent" onClick={() => void guard(api.startSession(), "Ders başladı.")}>
-              <Play size={12} /> Dersi Başlat
-            </Button>
           )}
           <IconButton label="Temayı değiştir" onClick={toggle}>
             {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
@@ -915,8 +914,7 @@ function Console() {
       </div>
 
       <StatusBar
-        className={session ? session.className : (info?.className ?? "—")}
-        sessionActive={session !== null}
+        className={info?.className ?? "—"}
         connected={info?.onlineCount ?? devices.filter((d) => d.online).length}
         selected={selected.size}
         inGroup={visible.length}
@@ -977,13 +975,50 @@ function Console() {
 
       <BrowserDialog
         open={browserOpen}
-        onClose={() => setBrowserOpen(false)}
+        pickFolder={
+          pendingFile
+            ? {
+                fileName: pendingFile.split(/[/\\]/).pop() ?? "",
+                deviceCount: actionTargets.length,
+              }
+            : undefined
+        }
+        onPick={(destination, subpath, shown) =>
+          void sendPendingFile(destination, subpath, shown)
+        }
+        onClose={() => {
+          setBrowserOpen(false);
+          setPendingFile(null);
+        }}
       />
 
       <TransfersDialog
         open={transfersOpen}
         devices={devices}
         onClose={() => setTransfersOpen(false)}
+      />
+
+      <RoomPickerDialog
+        open={info !== null && !info.setupCompleted}
+        devices={devices}
+        onPick={async ({ room, prefix }) => {
+          await guard(
+            api.updateSettings({
+              activeRoom: room,
+              activePrefix: prefix,
+              setupCompleted: true,
+            }),
+          );
+          setInfo(await api.getServerInfo().catch(() => info));
+          show(
+            "success",
+            room
+              ? `${room} laboratuvarı seçildi.`
+              : prefix
+                ? `${prefix} ile başlayan bilgisayarlar listelenecek.`
+                : "Bütün bilgisayarlar listelenecek.",
+          );
+        }}
       />
 
       <LockDialog
@@ -1001,7 +1036,6 @@ function Console() {
       <FocusDialog
         device={focusedDevice}
         frameBaseUrl={frameBaseUrl}
-        sessionActive={session !== null}
         controlled={controlled !== null && controlled === focusedDevice?.deviceId}
         onToggleControl={toggleControl}
         onClose={closeFocus}
@@ -1015,6 +1049,31 @@ function Console() {
 }
 
 // --------------------------------------------------------------- alt görünümler
+
+/**
+ * Cihaz verilen gruba ait mi?
+ *
+ * **Oda adı bilgisayar adı önekinden önce gelir.** Oda, öğrencinin ilk
+ * açılışta kendi girdiği değerdir; bilgisayar adı önekine dayanan eşleme ise
+ * okulun adlandırma disiplinine bağlıdır ve `DESKTOP-4F9K2A` gibi varsayılan
+ * adlarda hiç çalışmaz.
+ *
+ * Odası bilinen bir cihaz **yalnızca** o odanın grubunda görünür; öneki başka
+ * bir grupla eşleşse bile oraya düşmez. Aksi hâlde `LAB1` önekli ama "Lab 2"
+ * odasına taşınmış bir makine iki grupta birden görünürdü.
+ */
+function inGroup(device: DeviceView, group: DeviceGroup | null): boolean {
+  if (!group) return true;
+  if (device.room) {
+    return device.room.trim().toUpperCase() === group.name.trim().toUpperCase();
+  }
+  // Ön eki boş bir grup yalnızca odaya göre eşleşir. Boş metin her adın
+  // başında bulunduğundan `startsWith("")` bütün cihazları yakalar; odası
+  // bilinmeyen makineler o gruba düşmemeli.
+  const prefix = group.prefix.trim();
+  if (!prefix) return false;
+  return device.hostname.toUpperCase().startsWith(prefix.toUpperCase());
+}
 
 function HelpView({
   devices,

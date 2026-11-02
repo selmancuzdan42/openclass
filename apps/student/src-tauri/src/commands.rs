@@ -6,7 +6,7 @@ use openclass_protocol::DEFAULT_CONTROL_PORT;
 use tauri::State;
 
 use crate::state::{
-    parse_address, ActiveSession, AppState, ConnectionStatus, DiscoveredTeacher, PairIntent,
+    parse_address, AppState, ConnectionStatus, DiscoveredTeacher, PairIntent,
     ReceivedNotice, SharingState,
 };
 
@@ -20,7 +20,6 @@ pub struct StatusSnapshot {
     pub device_id: String,
     pub app_version: String,
     pub status: ConnectionStatus,
-    pub session: Option<ActiveSession>,
     pub sharing: SharingState,
     pub help_requested: bool,
     pub paired_teacher_name: Option<String>,
@@ -29,6 +28,8 @@ pub struct StatusSnapshot {
     pub notices: Vec<ReceivedNotice>,
     /// Bu platformda ekran yakalama destekleniyor mu?
     pub capture_supported: bool,
+    /// Bu bilgisayarın bulunduğu laboratuvar/oda adı.
+    pub room: Option<String>,
 }
 
 #[tauri::command]
@@ -39,7 +40,6 @@ pub fn get_status(state: State<'_, Arc<AppState>>) -> CmdResult<StatusSnapshot> 
         device_id: state.identity.device_id.to_string(),
         app_version: openclass_common::APP_VERSION.to_string(),
         status: state.status.read().clone(),
-        session: state.session.read().clone(),
         sharing: state.sharing.read().clone(),
         help_requested: *state.help_requested.read(),
         paired_teacher_name: cfg.paired_teacher.as_ref().map(|t| t.teacher_name.clone()),
@@ -50,7 +50,39 @@ pub fn get_status(state: State<'_, Arc<AppState>>) -> CmdResult<StatusSnapshot> 
         manual_address: cfg.manual_teacher_address.clone(),
         notices: state.notices.read().clone(),
         capture_supported: openclass_screen::is_supported(),
+        room: cfg.room.clone(),
     })
+}
+
+/// Laboratuvar/oda adını kaydeder.
+///
+/// Değer öğretmene `Hello` ile bildirilir ve konsol cihazları buna göre
+/// gruplayabilir. Yetki kararında **kullanılmaz** — yalnızca listelemeye
+/// yarayan bir beyandır.
+///
+/// Boş değer alanı temizler; o durumda öğretmen kayıtlı odayı korur
+/// (bkz. `Db::touch_device`), çünkü silmek isteyen öğrenci değil öğretmen
+/// olmalıdır.
+#[tauri::command]
+pub fn set_room(state: State<'_, Arc<AppState>>, room: String) -> CmdResult<()> {
+    const ODA_EN_FAZLA: usize = 64;
+
+    let temiz: String = room.trim().chars().take(ODA_EN_FAZLA).collect();
+    {
+        let mut cfg = state.config.write();
+        cfg.room = if temiz.is_empty() {
+            None
+        } else {
+            Some(temiz.clone())
+        };
+    }
+    state
+        .save_config()
+        .map_err(|e| format!("Oda adı kaydedilemedi: {e}"))?;
+
+    tracing::info!(oda = %temiz, "oda adı ayarlandı");
+    state.emit("status-changed", ());
+    Ok(())
 }
 
 /// Ağda görülen öğretmen konsolları.

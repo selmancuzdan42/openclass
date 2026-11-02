@@ -3,6 +3,59 @@
 Bu dosya [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/) biçimini,
 sürüm numaraları [Semantic Versioning](https://semver.org/lang/tr/) kurallarını izler.
 
+## [0.2.0] — 2026-11-03
+
+### Eklendi
+- **Açılışta laboratuvar seçimi.** Konsol ilk açılışta hangi bilgisayarların
+  yönetileceğini sorar: laboratuvar adı, bilgisayar adı ön eki veya tümü.
+  Ölçüt yazılır — ağda henüz makine görünmese de girilebilir, bilgisayarlar
+  açıldıkça süzgece takılırlar. Ayarlar'dan değiştirilir, **Yeniden sor** ile
+  ekran tekrar getirilir.
+- **Oda adı keşif duyurusunda taşınıyor.** Öğretmen bir laboratuvarı
+  eşleştirme yapmadan, cihaz bağlanmadan önce süzebilir.
+- **IP aralığı taraması.** Ek keşif adresleri `192.168.1.10-40` biçimini
+  kabul eder; yayının engellendiği ağlarda tek tek unicast probe gönderilir.
+  En fazla 254 adres, yalnızca son sekizlide aralık.
+- **Laboratuvar/oda adı.** Öğrenci ilk kurulumda bulunduğu laboratuvarın adını
+  girer; öğretmen konsolu cihazları buna göre gruplar. Listede **Oda** sütunu,
+  aramada oda adı, Grup Ekle penceresinde oda önerileri.
+- **İlk açılış sihirbazı** (öğrenci). İki adım: laboratuvar adı, ardından
+  eşleştirme. Yalnızca oda adı **ve** eşleştirme ikisi de yokken açılır;
+  0.1.0'dan yükselen eşleşmiş cihazlar sihirbaz görmez.
+- **İndirme klasörü seçimi.** Uzak gezginden alınan dosyalar öğretmenin
+  seçtiği klasöre toplanabilir; seçim oturum boyunca korunur, bilgisayar adı
+  alt klasörü korunur.
+- Veritabanı şema sürümleme (`PRAGMA user_version`). Geçişler yeniden
+  çalıştırılabilir; yarıda kalan geçiş sonraki açılışta tamamlanır.
+
+### Değiştirildi
+- **Ders oturumu kavramı kaldırıldı.** "Dersi Başlat/Bitir" düğmeleri,
+  `SessionStart`/`SessionEnd` protokol mesajları, `sessions` tablosu ve
+  oturuma bağlı bütün kapılar gitti. Konsol açıkken bağlanan bilgisayarların
+  önizlemesi kendiliğinden gelir, konsol kapanınca yayın durur.
+
+  Öğrenci tarafında paylaşımın gizlenmesini engelleyen tek koruma artık
+  **görünür göstergedir**: tepsi simgesi ve "EKRANINIZ PAYLAŞILIYOR" yazısı.
+  Bu gösterge hiçbir mesajla bastırılamaz.
+- **Dosya gönderiminde hedef, öğrencinin gezgininden seçiliyor.** Üç seçenekli
+  liste yerine öğrencinin klasörlerinde gezilip hedef işaretleniyor. Birden
+  çok cihaza gönderirken seçim köke göre göreli taşınır: `Belgeler\Ödevler`
+  her öğrencinin kendi klasöründe çözülür.
+- **Açılışta laboratuvar seçimi.** Konsol ilk açılışta hangi laboratuvarın
+  yönetileceğini sorar; liste o odaya süzülür. Seçim Ayarlar'dan
+  değiştirilebilir, boş bırakılırsa bütün bilgisayarlar listelenir.
+- Şeritte **Sınıf → Dosyalar** grubu: `Dosya Gönder` · `Dosya Al` ·
+  `Gönderimler` yan yana. Daha önce alma komutu (`Dosya Gezgini`) Yönetim
+  sekmesindeydi ve bulunması zordu.
+- Gruplama önceliği: **oda adı > bilgisayar adı öneki**. Odası bilinen cihaz
+  yalnızca o odanın grubunda görünür.
+- Şeritte klavye odağı halkası, basılı durum geri bildirimi ve daha okunur
+  grup başlıkları.
+
+### Düzeltildi
+- `CREATE TABLE IF NOT EXISTS` var olan bir veritabanında sütun eklemediği
+  için yeni alanlar sessizce eksik kalıyordu; şema sürümleme bunu kapattı.
+
 ## [0.1.0] — 2026-11-02
 
 ### Eklendi

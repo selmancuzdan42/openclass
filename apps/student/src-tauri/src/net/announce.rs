@@ -171,6 +171,7 @@ async fn handle(
             .paired_teacher
             .as_ref()
             .map(|p| p.teacher_id),
+        room: state.config.read().room.clone(),
     };
     socket
         .send_to(&reply.encode()?, from)

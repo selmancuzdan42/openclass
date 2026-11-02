@@ -6,11 +6,14 @@
 //! başarısız olduğunda. Makineye arkadan dosya bırakmak bu ürünün yapmadığı
 //! bir şeydir.
 //!
-//! # Sabit hedef klasör
+//! # Hedef klasör
 //!
-//! Dosyalar yalnızca [`inbox_dir`] altına yazılır. Öğretmen hedef yol
-//! seçemez: aksi hâlde sistem dizinlerine yazma kapısı açılırdı. Gelen ad
-//! [`sanitize_name`] ile temizlenir; yol bileşeni, sürücü harfi ve
+//! Öğretmen hedefi seçebilir ama **serbest yol gönderemez**: taşınan değer
+//! [`FileDestination`] (Belgeler · Masaüstü · İndirilenler) ve her biri
+//! öğrencinin kendi klasörüne çözülüp altına `OpenClass` eklenir. Serbest
+//! metin bir yol alanı sistem dizinlerine yazma kapısı açardı.
+//!
+//! Gelen ad [`sanitize_name`] ile temizlenir; yol bileşeni, sürücü harfi ve
 //! `..` kabul edilmez.
 //!
 //! # Doğrulama
@@ -24,6 +27,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+use openclass_protocol::control::FileDestination;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -41,21 +45,104 @@ pub const DISK_HEADROOM: u64 = 256 * 1024 * 1024;
 
 /// Gelen dosyaların yazıldığı klasör.
 ///
-/// Kullanıcının **Belgeler** klasörü altına yazılır, uygulamanın gizli veri
-/// dizinine değil: öğrenci gelen dosyayı kendi başına bulabilmeli.
-/// Belgeler klasörü okunamazsa veri dizinine düşülür.
-pub fn inbox_dir() -> Result<PathBuf> {
-    let base = directories::UserDirs::new()
-        .and_then(|u| u.document_dir().map(Path::to_path_buf))
-        .map(|d| d.join("OpenClass"))
-        .map_or_else(
-            || openclass_common::paths::data_dir(openclass_common::paths::App::Student),
-            Ok,
-        )?;
+/// Öğretmenin seçtiği kökün (`Belgeler` · `Masaüstü` · `İndirilenler`)
+/// altındaki `OpenClass` klasörüdür. Uygulamanın gizli veri dizini
+/// kullanılmaz: öğrenci gelen dosyayı kendi başına bulabilmeli.
+///
+/// Alt klasör her zaman eklenir. Dosyayı doğrudan Masaüstü'ne bırakmak
+/// öğrencinin kendi alanını dağıtmak olur.
+///
+/// Seçilen kök okunamazsa Belgeler'e, o da yoksa veri dizinine düşülür;
+/// böylece aktarım hiçbir koşulda yalnızca klasör yüzünden başarısız olmaz.
+pub fn inbox_dir(destination: FileDestination, subpath: Option<&str>) -> Result<PathBuf> {
+    let dirs = directories::UserDirs::new();
+    let kok = dirs.as_ref().and_then(|u| match destination {
+        FileDestination::Documents => u.document_dir().map(Path::to_path_buf),
+        FileDestination::Desktop => u.desktop_dir().map(Path::to_path_buf),
+        FileDestination::Downloads => u.download_dir().map(Path::to_path_buf),
+    });
 
+    // Seçilen kök yoksa Belgeler'e düş.
+    let kok = kok.or_else(|| dirs.as_ref().and_then(|u| u.document_dir().map(Path::to_path_buf)));
+
+    let Some(kok) = kok else {
+        // Hiçbir kullanıcı klasörü okunamadı: uygulamanın veri dizinine düş.
+        let base = openclass_common::paths::data_dir(openclass_common::paths::App::Student)?;
+        std::fs::create_dir_all(&base)
+            .with_context(|| format!("klasör oluşturulamadı: {}", base.display()))?;
+        return Ok(base);
+    };
+
+    let base = match subpath {
+        // Öğretmen gezginde bir klasör seçmiş: kökün altında o klasör.
+        Some(rel) => kok.join(safe_subpath(rel)?),
+        // Seçim yok: kökün altındaki OpenClass. Öğrencinin Masaüstü'ne
+        // doğrudan dosya saçmamak için alt klasör her zaman eklenir.
+        None => kok.join("OpenClass"),
+    };
+
+    // Son savunma: sonuç gerçekten kökün altında mı? `safe_subpath` zaten
+    // `..` ve mutlak yolu eliyor, bu kontrol sembolik bağ gibi dolaylı
+    // kaçışları da kapatır.
     std::fs::create_dir_all(&base)
         .with_context(|| format!("klasör oluşturulamadı: {}", base.display()))?;
+    let gercek = base
+        .canonicalize()
+        .with_context(|| format!("yol çözülemedi: {}", base.display()))?;
+    let kok_gercek = kok
+        .canonicalize()
+        .with_context(|| format!("yol çözülemedi: {}", kok.display()))?;
+    if !gercek.starts_with(&kok_gercek) {
+        bail!("Hedef klasör paylaşım kapsamı dışında.");
+    }
+
     Ok(base)
+}
+
+/// Öğretmenin gönderdiği göreli yolu güvenli bileşenlere indirger.
+///
+/// Kabul edilmeyenler: mutlak yol, sürücü harfi, `..`, `.`, boş bileşen.
+/// Her bileşen ayrıca [`sanitize_name`] ile temizlenir; Windows'ta yasak
+/// karakter taşıyan bir klasör adı dosyayı hiç yazdırmazdı.
+fn safe_subpath(raw: &str) -> Result<PathBuf> {
+    // Ayrıştırma `std::path`'e bırakılmaz: Linux'ta `\` sıradan bir karakter
+    // sayılır ve `C:\Windows` tek parça bir ad gibi görünür. Ajan Windows'ta
+    // çalıştığı için savunma platformdan bağımsız olmalı — iki ayırıcı da
+    // elle ele alınır.
+    if raw.starts_with('/') || raw.starts_with('\\') {
+        bail!("Hedef klasör mutlak yol olamaz.");
+    }
+    // Sürücü harfi (`C:`) ve Windows'ta yasak olan iki nokta.
+    if raw.contains(':') {
+        bail!("Hedef klasör geçersiz karakter içeriyor.");
+    }
+
+    let mut out = PathBuf::new();
+    let mut derinlik = 0usize;
+    for parca in raw.split(['/', '\\']) {
+        let parca = parca.trim();
+        if parca.is_empty() {
+            bail!("Hedef klasör boş bileşen içeriyor.");
+        }
+        if parca == "." || parca == ".." {
+            bail!("Hedef klasör göreli bileşen içeremez.");
+        }
+        let ad = sanitize_name(parca);
+        if ad.is_empty() || ad == "." || ad == ".." {
+            bail!("Hedef klasör adı geçersiz.");
+        }
+        out.push(ad);
+        derinlik += 1;
+    }
+
+    if derinlik == 0 {
+        bail!("Hedef klasör boş.");
+    }
+    // Makul bir derinlik sınırı: daha derini yanlışlıkla gönderilmiş demektir.
+    if derinlik > 8 {
+        bail!("Hedef klasör fazla derin.");
+    }
+    Ok(out)
 }
 
 /// Dosya adını güvenli bir ada indirger.
@@ -150,7 +237,14 @@ impl Incoming {
     ///
     /// Boyut sınırı ve disk payı burada kontrol edilir: reddedilecek bir
     /// aktarıma tek bayt bile yazılmaz.
-    pub fn open(transfer_id: Uuid, raw_name: &str, size: u64, expected: [u8; 32]) -> Result<Self> {
+    pub fn open(
+        transfer_id: Uuid,
+        raw_name: &str,
+        size: u64,
+        expected: [u8; 32],
+        destination: FileDestination,
+        subpath: Option<&str>,
+    ) -> Result<Self> {
         if size == 0 {
             bail!("Boş dosya gönderilemez.");
         }
@@ -162,7 +256,7 @@ impl Incoming {
             );
         }
 
-        let dir = inbox_dir()?;
+        let dir = inbox_dir(destination, subpath)?;
 
         if let Some(free) = free_space(&dir) {
             if free < size.saturating_add(DISK_HEADROOM) {
@@ -347,7 +441,60 @@ mod tests {
     #[test]
     fn bos_ve_cok_buyuk_dosya_reddedilir() {
         let id = Uuid::new_v4();
-        assert!(Incoming::open(id, "a.bin", 0, [0; 32]).is_err());
-        assert!(Incoming::open(id, "a.bin", MAX_FILE_SIZE + 1, [0; 32]).is_err());
+        assert!(Incoming::open(id, "a.bin", 0, [0; 32], Default::default(), None).is_err());
+        assert!(Incoming::open(id, "a.bin", MAX_FILE_SIZE + 1, [0; 32], Default::default(), None).is_err());
+    }
+
+    // ------------------------------------------- öğretmenin verdiği alt yol
+
+    #[test]
+    fn alt_yol_kacis_denemeleri_reddedilir() {
+        // Öğretmen hedefi gezginde seçer ama protokolde taşınan değer
+        // serbest metindir; değiştirilmiş bir konsol buraya ne yollarsa
+        // yollasın kök dışına çıkamamalı.
+        for kotu in [
+            "../../Windows/System32",
+            "..",
+            "Ödevler/../../..",
+            "/etc/passwd",
+            "C:\\Windows",
+            "\\\\sunucu\\pay",
+            "",
+            "   ",
+            "./gizli",
+        ] {
+            assert!(
+                safe_subpath(kotu).is_err(),
+                "kaçış denemesi kabul edildi: {kotu:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn gecerli_alt_yol_kabul_edilir() {
+        let yol = safe_subpath("Ödevler/Hafta 3").unwrap();
+        assert_eq!(yol, Path::new("Ödevler").join("Hafta 3"));
+
+        // Tek bileşen de geçerli.
+        assert_eq!(safe_subpath("Ödevler").unwrap(), Path::new("Ödevler"));
+    }
+
+    #[test]
+    fn asiri_derin_alt_yol_reddedilir() {
+        let derin = (0..9).map(|i| format!("k{i}")).collect::<Vec<_>>().join("/");
+        assert!(safe_subpath(&derin).is_err(), "9 seviye kabul edilmemeli");
+
+        let kabul = (0..8).map(|i| format!("k{i}")).collect::<Vec<_>>().join("/");
+        assert!(safe_subpath(&kabul).is_ok(), "8 seviye kabul edilmeli");
+    }
+
+    #[test]
+    fn alt_yol_bilesenleri_temizlenir() {
+        // Windows'ta yasak karakter taşıyan bileşenler temizlenir.
+        let yol = safe_subpath("Ders*Notlar").unwrap();
+        assert!(
+            !yol.to_string_lossy().contains('*'),
+            "yasak karakter kalmamalı: {yol:?}"
+        );
     }
 }

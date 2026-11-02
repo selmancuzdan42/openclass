@@ -2,7 +2,7 @@
 //!
 //! # Sınırlar
 //!
-//! * Yalnızca **aktif ders oturumunda** ve öğretmen kontrolü açıkça
+//! * Yalnızca öğretmen kontrolü açıkça
 //!   devraldığında çalışır.
 //! * Ders bittiğinde, kontrol bırakıldığında veya bağlantı koptuğunda
 //!   kendiliğinden durur.

@@ -17,21 +17,26 @@ export interface DeviceView {
   frameAgeMs: number;
   connectedAt: number;
   screenError: string | null;
+  /** Öğrencinin bildirdiği laboratuvar/oda adı; bilinmiyorsa `null`. */
+  room: string | null;
 }
 
 export type Authorization = "authorized" | "pending" | "rejected" | "unknown";
+
+/**
+ * Dosya gönderiminde hedef kök. Rust tarafındaki
+ * `control::FileDestination` karşılığı (`rename_all = "snake_case"`).
+ *
+ * Serbest yol taşınmaz: öğrenci tarafında her değer kullanıcının kendi
+ * klasörüne çözülür ve altına `OpenClass` eklenir.
+ */
+export type FileDestination = "documents" | "desktop" | "downloads";
 
 export interface PairingInfo {
   code: string;
   remainingSecs: number;
   maxAttempts: number;
   failedAttempts: number;
-}
-
-export interface ClassSession {
-  sessionId: string;
-  className: string;
-  startedAt: number;
 }
 
 export interface ServerInfo {
@@ -45,6 +50,10 @@ export interface ServerInfo {
   onlineCount: number;
   extraDiscoveryHosts: string[];
   setupCompleted: boolean;
+  /** Konsolun yönettiği laboratuvar; `null` ise bütün cihazlar listelenir. */
+  activeRoom: string | null;
+  /** Konsolun süzdüğü bilgisayar adı ön eki; `null` ise süzme yok. */
+  activePrefix: string | null;
   /** Ağ servisleri başlatılamadıysa sebebi. */
   networkError: string | null;
 }
@@ -99,8 +108,11 @@ export interface DeviceGroup {
 
 /** Bilgisayar adlarından çıkarılan grup önerisi. */
 export interface GroupSuggestion {
+  /** Bilgisayar adı ön eki; oda tabanlı öneride boş. */
   prefix: string;
   deviceCount: number;
+  /** Öneri bir odadan geliyorsa oda adı, değilse `null`. */
+  room: string | null;
 }
 
 /** Bir dosya gönderiminde tek alıcının durumu. */

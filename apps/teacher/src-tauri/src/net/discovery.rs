@@ -150,9 +150,16 @@ fn probe_targets(state: &AppState) -> Vec<SocketAddr> {
     let mut targets = vec![SocketAddr::from((Ipv4Addr::BROADCAST, port))];
 
     for entry in &state.config.read().extra_discovery_hosts {
-        // Girdi `ip`, `ad` veya `ip:port` biçiminde olabilir. Port belirtmek,
-        // aynı makinede birden fazla öğrenci ajanı çalıştırırken gerekir.
+        // Girdi `ip`, `ad`, `ip:port` veya `192.168.1.10-40` biçiminde
+        // olabilir. Port belirtmek, aynı makinede birden fazla öğrenci ajanı
+        // çalıştırırken gerekir.
         let (host, target_port) = split_host_port(entry, port);
+
+        // Aralık mı? `192.168.1.10-40` → .10'dan .40'a kadar.
+        if let Some(aralik) = expand_ipv4_range(&host) {
+            targets.extend(aralik.into_iter().map(|ip| SocketAddr::new(ip.into(), target_port)));
+            continue;
+        }
 
         match host.parse::<IpAddr>() {
             Ok(ip) => targets.push(SocketAddr::new(ip, target_port)),
@@ -166,6 +173,59 @@ fn probe_targets(state: &AppState) -> Vec<SocketAddr> {
         }
     }
     targets
+}
+
+/// Taranacak en fazla adres.
+///
+/// Yayının engellendiği ağlarda tek tek unicast probe gönderilir. Bir /24
+/// alt ağ 254 adrestir; bundan büyük bir aralık yanlışlıkla girilmiş
+/// demektir ve ağı gereksiz paketle doldurur.
+const MAX_RANGE_HOSTS: u32 = 254;
+
+/// `192.168.1.10-40` biçimindeki aralığı adreslere açar.
+///
+/// Yalnızca son sekizlide aralık desteklenir: okul ağlarında ihtiyaç bu, ve
+/// `10.0.0.1-10.0.3.255` gibi geniş aralıklar yüz binlerce probe demek olur.
+/// Aralık değilse `None` döner ve girdi olağan yolla çözülür.
+fn expand_ipv4_range(host: &str) -> Option<Vec<Ipv4Addr>> {
+    let (bas, son) = host.split_once('-')?;
+
+    let ilk: Ipv4Addr = bas.trim().parse().ok()?;
+    let son = son.trim();
+
+    // Son taraf tam adres de olabilir (`192.168.1.40`), yalnız sekizli de
+    // (`40`). İkincisi yaygın yazım.
+    let son_sekizli: u8 = match son.parse::<Ipv4Addr>() {
+        Ok(tam) => {
+            let a = ilk.octets();
+            let b = tam.octets();
+            // İlk üç sekizli aynı olmalı; değilse aralık çok geniştir.
+            if a[0] != b[0] || a[1] != b[1] || a[2] != b[2] {
+                tracing::warn!(%host, "yalnızca son sekizlide aralık desteklenir");
+                return None;
+            }
+            b[3]
+        }
+        Err(_) => son.parse().ok()?,
+    };
+
+    let o = ilk.octets();
+    if son_sekizli < o[3] {
+        tracing::warn!(%host, "aralığın sonu başından küçük");
+        return None;
+    }
+
+    let adet = u32::from(son_sekizli - o[3]) + 1;
+    if adet > MAX_RANGE_HOSTS {
+        tracing::warn!(%host, adet, "aralık çok geniş, yok sayıldı");
+        return None;
+    }
+
+    Some(
+        (o[3]..=son_sekizli)
+            .map(|d| Ipv4Addr::new(o[0], o[1], o[2], d))
+            .collect(),
+    )
 }
 
 /// `ip`, `ad` veya `ip:port` biçimindeki girdiyi ayırır.
@@ -225,6 +285,7 @@ fn handle_datagram(state: &AppState, data: &[u8], from: SocketAddr) {
             hostname,
             app_version,
             paired_to,
+            room,
             ..
         } => {
             let hostname = hostname.trim().to_ascii_uppercase();
@@ -233,6 +294,12 @@ fn handle_datagram(state: &AppState, data: &[u8], from: SocketAddr) {
                 return;
             }
             tracing::debug!(%from, %hostname, %device_id, "öğrenci keşfedildi");
+            // Oda adı öğrencinin beyanıdır; yetki kararında kullanılmaz,
+            // yalnızca listelemeye yarar. Boş değer bilinmiyor sayılır.
+            let room = room
+                .map(|r| r.trim().chars().take(64).collect::<String>())
+                .filter(|r| !r.is_empty());
+
             state.registry.record_discovery(DiscoveredDevice {
                 device_id,
                 hostname,
@@ -240,6 +307,7 @@ fn handle_datagram(state: &AppState, data: &[u8], from: SocketAddr) {
                 app_version,
                 last_seen: now(),
                 paired_to_us: paired_to == Some(state.teacher_id),
+                room,
             });
         }
 
@@ -255,7 +323,8 @@ fn handle_datagram(state: &AppState, data: &[u8], from: SocketAddr) {
 
 #[cfg(test)]
 mod tests {
-    use super::split_host_port;
+    use super::{expand_ipv4_range, split_host_port};
+    use std::net::Ipv4Addr;
 
     #[test]
     fn portsuz_hedef_varsayilan_portu_alir() {
@@ -288,5 +357,47 @@ mod tests {
             ("fe80::1".into(), 7646)
         );
         assert_eq!(split_host_port("[fe80::1]", 7644), ("fe80::1".into(), 7644));
+    }
+
+    #[test]
+    fn ip_araligi_acilir() {
+        let a = expand_ipv4_range("192.168.1.10-13").unwrap();
+        assert_eq!(
+            a,
+            vec![
+                Ipv4Addr::new(192, 168, 1, 10),
+                Ipv4Addr::new(192, 168, 1, 11),
+                Ipv4Addr::new(192, 168, 1, 12),
+                Ipv4Addr::new(192, 168, 1, 13),
+            ]
+        );
+
+        // Son taraf tam adres olarak da yazılabilir.
+        let b = expand_ipv4_range("192.168.1.10-192.168.1.11").unwrap();
+        assert_eq!(b.len(), 2);
+
+        // Tek adreslik aralık geçerlidir.
+        assert_eq!(expand_ipv4_range("10.0.0.5-5").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn bozuk_veya_asiri_aralik_reddedilir() {
+        // Aralık değil: olağan yolla çözülsün diye None döner.
+        assert!(expand_ipv4_range("192.168.1.10").is_none());
+        assert!(expand_ipv4_range("ogretmen.okul.local").is_none());
+
+        // Sonu başından küçük.
+        assert!(expand_ipv4_range("192.168.1.40-10").is_none());
+
+        // Farklı alt ağ: yalnızca son sekizlide aralık desteklenir.
+        assert!(expand_ipv4_range("192.168.1.1-192.168.3.1").is_none());
+
+        // 254'ten geniş olamaz.
+        assert!(expand_ipv4_range("10.0.0.0-255").is_none());
+        assert!(expand_ipv4_range("10.0.0.1-254").is_some());
+
+        // Bozuk yazımlar.
+        assert!(expand_ipv4_range("192.168.1.x-10").is_none());
+        assert!(expand_ipv4_range("-").is_none());
     }
 }

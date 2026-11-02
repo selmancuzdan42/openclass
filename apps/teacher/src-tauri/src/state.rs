@@ -30,6 +30,11 @@ pub struct DiscoveredDevice {
     pub last_seen: i64,
     /// Cihaz başka bir öğretmene mi eşleşmiş?
     pub paired_to_us: bool,
+    /// Keşif duyurusunda bildirilen oda adı; eski ajanlarda `None`.
+    ///
+    /// Bağlanmadan önce bilinmesi, öğretmenin bir laboratuvarı daha
+    /// eşleştirme yapmadan süzebilmesini sağlar.
+    pub room: Option<String>,
 }
 
 /// Bağlı ve kimliği doğrulanmış cihaz.
@@ -70,16 +75,14 @@ pub struct DeviceView {
     pub connected_at: i64,
     /// Ekran yakalama hatası varsa Türkçe açıklaması.
     pub screen_error: Option<String>,
+    /// Öğrencinin bildirdiği laboratuvar/oda adı; bilinmiyorsa `None`.
+    ///
+    /// Gruplamada bilgisayar adı önekinden **önce** gelir. Yalnızca keşifte
+    /// görülmüş, hiç bağlanmamış cihazlarda `None` olur: oda adı ancak
+    /// `Hello` ile gelir, keşif duyurusunda taşınmaz.
+    pub room: Option<String>,
 }
 
-/// Aktif ders oturumu.
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ClassSession {
-    pub session_id: Uuid,
-    pub class_name: String,
-    pub started_at: i64,
-}
 
 /// Ekranda gösterilen, kısa ömürlü eşleştirme kodu.
 pub struct ActivePairing {
@@ -235,15 +238,6 @@ impl Registry {
             .unwrap_or_default()
     }
 
-    /// Tüm yayınları durdurulmuş sayar (ders bitişinde).
-    pub fn clear_all_streaming(&self) {
-        for flags in self.flags.write().values_mut() {
-            flags.streaming = false;
-            flags.quality = None;
-        }
-        self.screens.write().clear();
-    }
-
     // ------------------------------------------------------------ ekran verisi
 
     /// Yeni ekran güncellemesini ekler.
@@ -311,6 +305,7 @@ impl Registry {
                     frame_age_ms: 0,
                     connected_at: 0,
                     screen_error: None,
+                    room: rec.room,
                 },
             );
         }
@@ -333,9 +328,14 @@ impl Registry {
                 frame_age_ms: 0,
                 connected_at: 0,
                 screen_error: None,
+                room: d.room.clone(),
             });
             view.discovered = true;
             view.address = Some(d.address.clone());
+            // Kayıtta oda yoksa (0.1.0'dan yükselen cihaz) keşiften geleni al.
+            if view.room.is_none() {
+                view.room = d.room.clone();
+            }
             view.last_seen = view.last_seen.max(d.last_seen);
             // Ağdaki ad, kayıttaki addan tazedir.
             view.hostname = d.hostname.clone();
@@ -394,14 +394,17 @@ pub struct AppState {
     /// Testte kullanılan sabit eşleştirme kodu (yalnızca hata ayıklama
     /// derlemesinde dolu olur; bkz. [`crate::testing`]).
     pub test_pairing_code: Option<String>,
-    /// Aktif ders oturumu. `None` ise hiçbir ekran yayını başlatılamaz.
-    pub session: RwLock<Option<ClassSession>>,
     /// Arayüze olay göndermek için Tauri tutamacı.
     pub app: RwLock<Option<tauri::AppHandle>>,
     /// Multicast paketleri ulaşmayan cihazlar; bunlara TLS unicast yapılır.
     pub broadcast_fallback: RwLock<std::collections::HashSet<Uuid>>,
     /// Açık uzak dosya gezgini oturumu; aynı anda tek öğrenci gezilir.
     pub browse: RwLock<Option<crate::browse::BrowseSession>>,
+    /// Öğretmenin seçtiği indirme klasörü.
+    ///
+    /// Oturum boyunca hatırlanır; her indirmede yeniden sorulmaz. Diske
+    /// yazılmaz — yapılandırmaya girmesi gerekirse 0.3.0'da eklenir.
+    pub download_root: RwLock<Option<std::path::PathBuf>>,
     /// Yürüyen ve biten dosya gönderimleri.
     pub transfers: RwLock<HashMap<Uuid, crate::transfer::TransferView>>,
     /// Uzaktan kontrol edilen cihaz; aynı anda yalnızca bir tane olabilir.
@@ -426,7 +429,6 @@ impl AppState {
         self.config.read().save(&self.config_path)
     }
 
-    /// Şu an aktif bir ders oturumu var mı?
     /// Yayın durumunu arayüze yeniden bildirir.
     ///
     /// TLS yedeğine düşen cihaz sayısı değiştiğinde çağrılır.
@@ -453,9 +455,6 @@ impl AppState {
         self.emit("transfers-changed", list);
     }
 
-    pub fn session_active(&self) -> bool {
-        self.session.read().is_some()
-    }
 
     /// Arayüze olay yayar. Pencere henüz yoksa sessizce atlanır.
     pub fn emit<T: serde::Serialize + Clone>(&self, event: &str, payload: T) {
@@ -525,6 +524,7 @@ mod tests {
             app_version: "0.1.0".to_string(),
             last_seen: now(),
             paired_to_us: false,
+            room: None,
         }
     }
 
@@ -616,18 +616,6 @@ mod tests {
             reg.screen_blob(id, 5).is_none(),
             "arayüz güncelse yeniden veri gönderilmemeli"
         );
-    }
-
-    #[test]
-    fn ders_bitince_tum_yayinlar_durur() {
-        let reg = Registry::new();
-        let a = Uuid::new_v4();
-        let b = Uuid::new_v4();
-        reg.update_flags(a, |f| f.streaming = true);
-        reg.update_flags(b, |f| f.streaming = true);
-        reg.clear_all_streaming();
-        assert!(!reg.flags(a).streaming);
-        assert!(!reg.flags(b).streaming);
     }
 
     #[test]

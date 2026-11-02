@@ -82,34 +82,6 @@ pub fn spawn_autostart(state: Arc<AppState>) {
                 _ = ticker.tick() => {}
             }
 
-            // Oturum yoksa aç.
-            if !state.session_active() {
-                let class_name = state.config.read().class_name.clone();
-                let session = crate::state::ClassSession {
-                    session_id: uuid::Uuid::new_v4(),
-                    class_name: class_name.clone(),
-                    started_at: crate::db::now(),
-                };
-                if let Err(err) = state.db.start_session(session.session_id, &class_name) {
-                    tracing::error!(%err, "test oturumu kaydedilemedi");
-                    continue;
-                }
-                *state.session.write() = Some(session.clone());
-                let teacher_name = state.config.read().teacher_name.clone();
-
-                for (_, tx) in state.registry.all_senders() {
-                    let _ = tx
-                        .send(ServerMessage::SessionStart {
-                            session_id: session.session_id,
-                            teacher_name: teacher_name.clone(),
-                            class_name: class_name.clone(),
-                        })
-                        .await;
-                }
-                state.emit("session-changed", Some(session));
-                tracing::info!("TEST MODU: ders oturumu açıldı");
-            }
-
             // İstenmişse öğretmen ekranı yayınını da aç.
             if !state.broadcasting()
                 && state.registry.online_count() > 0

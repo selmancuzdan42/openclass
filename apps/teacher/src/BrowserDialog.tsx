@@ -6,15 +6,19 @@ import {
   Download,
   Eye,
   FileIcon,
+  FileUp,
   Folder,
+  FolderCog,
   FolderOpen,
   HardDrive,
   XCircle,
 } from "lucide-react";
 
+import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
+
 import { api, formatTime } from "./api";
-import { Button, Empty, Modal } from "./ui";
-import type { BrowseEntry, BrowseView } from "./types";
+import { Button, Empty, Modal, useToast } from "./ui";
+import type { BrowseEntry, BrowseRoot, BrowseView, FileDestination } from "./types";
 
 /**
  * Uzak dosya gezgini.
@@ -27,50 +31,171 @@ import type { BrowseEntry, BrowseView } from "./types";
  */
 export function BrowserDialog({
   open,
+  pickFolder,
+  onPick,
   onClose,
 }: {
   open: boolean;
+  /**
+   * Klasör seçme kipi: indirme yerine hedef klasör seçilir.
+   *
+   * Dosya gönderiminde kullanılır. Gönderim birden çok cihaza gidebildiği
+   * için seçim tek bir öğrencinin gezgininde yapılır; taşınan değer köke
+   * göre göreli olduğundan aynı yol herkeste kendi klasörüne denk gelir.
+   */
+  pickFolder?: { fileName: string; deviceCount: number };
+  onPick?: (destination: FileDestination, subpath: string | null, shown: string) => void;
   onClose: () => void;
 }) {
+  const { show } = useToast();
   const [view, setView] = useState<BrowseView | null>(null);
+  /** İndirmelerin yazıldığı klasör; oturum boyunca korunur. */
+  const [downloadRoot, setDownloadRoot] = useState<string>("");
 
   useEffect(() => {
     if (!open) return;
     void api.getBrowse().then(setView).catch(() => {});
+    void api.getDownloadRoot().then(setDownloadRoot).catch(() => {});
     const unlisten = listen<BrowseView | null>("browse-changed", (e) => setView(e.payload));
     return () => {
       void unlisten.then((f) => f());
     };
   }, [open]);
 
+  /** İndirme klasörünü değiştirir. Seçim oturum boyunca hatırlanır. */
+  async function pickDownloadRoot() {
+    const picked = await openFolderDialog({
+      directory: true,
+      multiple: false,
+      title: "İndirilen dosyaların toplanacağı klasörü seçin",
+    });
+    if (typeof picked !== "string") return;
+    try {
+      setDownloadRoot(await api.setDownloadRoot(picked));
+    } catch (err) {
+      show("error", err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  /**
+   * Gezgindeki mutlak yolu kök + göreli yola ayırır.
+   *
+   * Öğrencinin kullanıcı klasörü her makinede başka yerdedir
+   * (`C:\\Users\\ali\\Belgeler`), bu yüzden mutlak yol taşınamaz. Kök
+   * etiketi kapalı bir kümeye (`FileDestination`) eşlenir, kalan kısım
+   * göreli yol olarak gider.
+   *
+   * `OpenClass` kökü Belgeler'in altında olduğundan kendiliğinden
+   * `documents` + `OpenClass` olarak çözülür.
+   */
+  function resolveTarget(
+    path: string,
+    roots: BrowseRoot[],
+  ): { destination: FileDestination; subpath: string | null } | null {
+    const eslesme: Record<string, FileDestination> = {
+      "Masaüstü": "desktop",
+      Belgeler: "documents",
+      İndirilenler: "downloads",
+    };
+
+    let best: { root: BrowseRoot; destination: FileDestination } | null = null;
+    for (const r of roots) {
+      const destination = eslesme[r.label];
+      if (!destination) continue;
+      const altinda =
+        path === r.path || path.startsWith(r.path + "\\") || path.startsWith(r.path + "/");
+      if (!altinda) continue;
+      // En uzun eşleşen kök kazanır: iç içe kökler olabilir.
+      if (!best || r.path.length > best.root.path.length) best = { root: r, destination };
+    }
+    if (!best) return null;
+
+    const rel = path.slice(best.root.path.length).replace(/^[\\/]+/, "");
+    return { destination: best.destination, subpath: rel || null };
+  }
+
   const atRoots = !view?.path;
   const parent = parentOf(view?.path ?? "");
+  // Klasör seçme kipinde: şu an bulunulan klasör geçerli bir hedef mi?
+  const hedef =
+    pickFolder && view?.path ? resolveTarget(view.path, view.roots) : null;
 
   return (
     <Modal
       open={open}
       width="xl"
-      title={view ? `${view.hostname} — dosyalar` : "Dosya gezgini"}
+      title={
+        pickFolder
+          ? `“${pickFolder.fileName}” nereye gönderilsin?`
+          : view
+            ? `${view.hostname} — dosyalar`
+            : "Dosya gezgini"
+      }
       onClose={onClose}
       footer={
-        <>
-          <span className="mr-auto flex items-center gap-1.5 text-[11px]
-            text-[var(--color-text-3)]">
-            <Eye size={12} />
-            Öğrencide “dosyalarınıza bakılıyor” göstergesi duruyor
-          </span>
-          <Button onClick={() => void api.openDownloadsDir()}>
-            <FolderOpen size={13} /> Toplanan Klasörü
-          </Button>
-          <Button
-            onClick={async () => {
-              await api.closeBrowser().catch(() => {});
-              onClose();
-            }}
-          >
-            Kapat
-          </Button>
-        </>
+        pickFolder ? (
+          <>
+            <span className="mr-auto text-[11px] leading-snug text-[var(--color-text-3)]">
+              {view?.hostname} üzerinde seçiyorsunuz; aynı klasör{" "}
+              {pickFolder.deviceCount} cihazın her birinde kendi
+              kullanıcı klasörü altında kullanılır.
+            </span>
+            <Button
+              onClick={async () => {
+                await api.closeBrowser().catch(() => {});
+                onClose();
+              }}
+            >
+              Vazgeç
+            </Button>
+            <Button
+              tone="accent"
+              disabled={!view || atRoots || !hedef}
+              title={
+                atRoots
+                  ? "Bir klasöre girin"
+                  : hedef
+                    ? undefined
+                    : "Bu konuma gönderilemez"
+              }
+              onClick={async () => {
+                if (!hedef || !view) return;
+                await api.closeBrowser().catch(() => {});
+                onPick?.(hedef.destination, hedef.subpath, view.path);
+              }}
+            >
+              <FileUp size={13} /> Buraya Gönder
+            </Button>
+          </>
+        ) : (
+          <>
+            <span className="mr-auto flex items-center gap-1.5 text-[11px]
+              text-[var(--color-text-3)]">
+              <Eye size={12} />
+              Öğrencide “dosyalarınıza bakılıyor” göstergesi duruyor
+            </span>
+            <Button
+              title={downloadRoot ? `İndirmeler: ${downloadRoot}` : "İndirme klasörünü seç"}
+              onClick={() => void pickDownloadRoot()}
+            >
+              <FolderCog size={13} /> Klasörü Değiştir
+            </Button>
+            <Button
+              title={downloadRoot || undefined}
+              onClick={() => void api.openDownloadsDir()}
+            >
+              <FolderOpen size={13} /> Toplanan Klasörü
+            </Button>
+            <Button
+              onClick={async () => {
+                await api.closeBrowser().catch(() => {});
+                onClose();
+              }}
+            >
+              Kapat
+            </Button>
+          </>
+        )
       }
     >
       {!view ? (

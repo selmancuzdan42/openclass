@@ -9,9 +9,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AuditEntry,
   BroadcastInfo,
-  ClassSession,
   DeviceGroup,
   DeviceView,
+  FileDestination,
   GroupSuggestion,
   BrowseView,
   InputEvent,
@@ -40,9 +40,6 @@ export const api = {
   cancelPairing: () => call<void>("cancel_pairing"),
   getPairing: () => call<PairingInfo | null>("get_pairing"),
 
-  startSession: (className?: string) => call<ClassSession>("start_session", { className }),
-  endSession: () => call<void>("end_session"),
-  getSession: () => call<ClassSession | null>("get_session"),
 
   startScreenStreams: (deviceIds: string[], quality: Quality) =>
     call<number>("start_screen_streams", { deviceIds, quality }),
@@ -61,6 +58,10 @@ export const api = {
     className?: string;
     extraDiscoveryHosts?: string[];
     setupCompleted?: boolean;
+    /** Boş metin "bütün laboratuvarlar" demektir. */
+    activeRoom?: string;
+    /** Boş metin "ön ek süzmesi yok" demektir. */
+    activePrefix?: string;
   }) => call<void>("update_settings", settings),
   getAuditLog: (limit?: number) => call<AuditEntry[]>("get_audit_log", { limit }),
 
@@ -84,9 +85,16 @@ export const api = {
   browseFetch: (path: string) => call<void>("browse_fetch", { path }),
   getBrowse: () => call<BrowseView | null>("get_browse"),
   openDownloadsDir: () => call<void>("open_downloads_dir"),
+  getDownloadRoot: () => call<string>("get_download_root"),
+  /** `null` varsayılan klasöre döner. Dönen değer yürürlükteki klasördür. */
+  setDownloadRoot: (path: string | null) => call<string>("set_download_root", { path }),
 
-  sendFile: (deviceIds: string[], path: string) =>
-    call<string>("send_file", { deviceIds, path }),
+  sendFile: (
+    deviceIds: string[],
+    path: string,
+    destination: FileDestination,
+    subpath: string | null,
+  ) => call<string>("send_file", { deviceIds, path, destination, subpath }),
   getTransfers: () => call<TransferView[]>("get_transfers"),
   clearFinishedTransfers: () => call<void>("clear_finished_transfers"),
 
@@ -113,8 +121,6 @@ export const AUDIT_LABELS: Record<string, string> = {
   device_connected: "Cihaz bağlandı",
   device_disconnected: "Cihaz ayrıldı",
   auth_failed: "Kimlik doğrulama başarısız",
-  session_started: "Ders oturumu başladı",
-  session_ended: "Ders oturumu bitti",
   screen_stream_started: "Ekran yayını başladı",
   screen_stream_stopped: "Ekran yayını durdu",
   notice_sent: "Mesaj gönderildi",

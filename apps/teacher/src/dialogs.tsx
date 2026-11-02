@@ -1,5 +1,5 @@
 /** Komut şeridinden açılan iletişim kutuları. */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 
 import { api, AUDIT_LABELS, formatTime } from "./api";
@@ -191,8 +191,15 @@ export function GroupDialog({
     void api.suggestGroups().then(setSuggestions).catch(() => setSuggestions([]));
   }, [open]);
 
-  const taken = new Set(existing.map((g) => g.prefix));
-  const fresh = suggestions.filter((s) => !taken.has(s.prefix));
+  // Zaten eklenmiş gruplar önerilerden düşülür. Oda önerisi ada göre,
+  // ön ek önerisi ön eke göre karşılaştırılır.
+  const alinanOnekler = new Set(existing.map((g) => g.prefix.trim().toUpperCase()));
+  const alinanOdalar = new Set(existing.map((g) => g.name.trim().toUpperCase()));
+  const fresh = suggestions.filter((s) =>
+    s.room
+      ? !alinanOdalar.has(s.room.trim().toUpperCase())
+      : !alinanOnekler.has(s.prefix.trim().toUpperCase()),
+  );
 
   return (
     <Modal
@@ -204,7 +211,7 @@ export function GroupDialog({
           <Button onClick={onClose}>Vazgeç</Button>
           <Button
             tone="accent"
-            disabled={!name.trim() || !prefix.trim()}
+            disabled={!name.trim()}
             onClick={async () => {
               const ok = await guard(api.saveGroup(name, prefix), `${name} grubu eklendi.`);
               if (ok !== undefined) {
@@ -218,29 +225,51 @@ export function GroupDialog({
         </>
       }
     >
-      <p className="mb-3 text-[11px] text-[var(--color-text-2)]">
-        Grup, bilgisayar adı ön ekinden ibarettir. <code>LAB1</code> ön eki{" "}
-        <code>LAB101</code>, <code>LAB102</code> … cihazlarını kapsar. Hiçbir adlandırma
-        düzeni önceden varsayılmaz.
+      <p className="mb-3 text-[11px] leading-relaxed text-[var(--color-text-2)]">
+        Bir grup iki yolla eşleşir. <strong>Oda adı</strong> önce gelir:
+        öğrencinin ilk açılışta girdiği laboratuvar adı grup adıyla aynıysa
+        cihaz bu gruba düşer. Odası bilinmeyen cihazlar için{" "}
+        <strong>bilgisayar adı ön eki</strong> kullanılır — <code>LAB1</code>{" "}
+        ön eki <code>LAB101</code>, <code>LAB102</code> … cihazlarını kapsar.
+        Yalnızca odaya göre eşleşen bir grup için ön eki boş bırakın.
       </p>
 
       {fresh.length > 0 && (
         <div className="mb-3">
           <p className="mb-1.5 text-[11px] font-medium text-[var(--color-text-2)]">
-            Ağdaki adlardan öneriler
+            Öneriler — bildirilen odalar ve ağdaki adlar
           </p>
           <div className="flex flex-wrap gap-1.5">
             {fresh.map((s) => (
               <button
-                key={s.prefix}
+                key={s.room ? `oda:${s.room}` : `onek:${s.prefix}`}
+                title={
+                  s.room
+                    ? "Öğrencilerin bildirdiği oda adı"
+                    : "Bilgisayar adlarından çıkarılan ön ek"
+                }
                 onClick={() => {
-                  setPrefix(s.prefix);
-                  if (!name.trim()) setName(s.prefix);
+                  if (s.room) {
+                    setName(s.room);
+                    setPrefix("");
+                  } else {
+                    setPrefix(s.prefix);
+                    if (!name.trim()) setName(s.prefix);
+                  }
                 }}
-                className="rounded border border-[var(--color-stroke-strong)] px-2 py-1
-                  text-[11px] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                className={`rounded border px-2 py-1 text-[11px]
+                  hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]
+                  ${
+                    s.room
+                      ? "border-[var(--color-accent)]/40 bg-[var(--color-accent-soft)]"
+                      : "border-[var(--color-stroke-strong)]"
+                  }`}
               >
-                <span className="font-mono">{s.prefix}</span>
+                {s.room ? (
+                  <span>{s.room}</span>
+                ) : (
+                  <span className="font-mono">{s.prefix}</span>
+                )}
                 <span className="ml-1.5 text-[var(--color-text-3)]">{s.deviceCount} cihaz</span>
               </button>
             ))}
@@ -257,7 +286,10 @@ export function GroupDialog({
             placeholder="Lab 1"
           />
         </Field>
-        <Field label="Bilgisayar adı ön eki" hint="Büyük/küçük harf fark etmez.">
+        <Field
+          label="Bilgisayar adı ön eki"
+          hint="Büyük/küçük harf fark etmez. Yalnızca odaya göre eşleşmesi için boş bırakın."
+        >
           <TextInput
             className="w-full font-mono"
             value={prefix}
@@ -275,14 +307,12 @@ export function GroupDialog({
 export function FocusDialog({
   device,
   frameBaseUrl,
-  sessionActive,
   controlled,
   onToggleControl,
   onClose,
 }: {
   device: DeviceView | null;
   frameBaseUrl: string;
-  sessionActive: boolean;
   /** Bu cihaz şu anda uzaktan kontrol ediliyor mu? */
   controlled: boolean;
   onToggleControl: () => void;
@@ -313,12 +343,7 @@ export function FocusDialog({
             )}
             <Button
               tone={controlled ? "danger" : "accent"}
-              disabled={!device.online || !sessionActive}
-              title={
-                sessionActive
-                  ? undefined
-                  : "Uzaktan kontrol için önce ders oturumunu başlatın"
-              }
+              disabled={!device.online}
               onClick={onToggleControl}
             >
               {controlled ? (
@@ -350,10 +375,7 @@ export function FocusDialog({
           <Empty
             title="Henüz görüntü yok"
             detail={
-              device.screenError ??
-              (sessionActive
-                ? "Ekran yayını başlatıldı, ilk kare bekleniyor."
-                : "Ekran izlemek için önce ders oturumunu başlatın.")
+              device.screenError ?? "Ekran yayını başlatıldı, ilk kare bekleniyor."
             }
           />
         ))}
@@ -377,12 +399,16 @@ export function SettingsDialog({
   const { guard } = useToast();
   const [teacherName, setTeacherName] = useState("");
   const [className, setClassName] = useState("");
+  const [activeRoom, setActiveRoom] = useState("");
+  const [activePrefix, setActivePrefix] = useState("");
   const [hosts, setHosts] = useState("");
 
   useEffect(() => {
     if (!info || !open) return;
     setTeacherName(info.teacherName);
     setClassName(info.className);
+    setActiveRoom(info.activeRoom ?? "");
+    setActivePrefix(info.activePrefix ?? "");
     setHosts(info.extraDiscoveryHosts.join("\n"));
   }, [info, open]);
 
@@ -401,6 +427,8 @@ export function SettingsDialog({
                 api.updateSettings({
                   teacherName,
                   className,
+                  activeRoom,
+                  activePrefix,
                   extraDiscoveryHosts: hosts.split("\n").map((h) => h.trim()).filter(Boolean),
                 }),
                 "Ayarlar kaydedildi.",
@@ -430,8 +458,47 @@ export function SettingsDialog({
           />
         </Field>
         <Field
+          label="Yönetilen laboratuvar"
+          hint="Öğrencilerin bildirdiği oda adı. Boş bırakılırsa oda süzmesi yapılmaz."
+        >
+          <TextInput
+            className="w-full"
+            value={activeRoom}
+            placeholder="Tümü"
+            onChange={(e) => setActiveRoom(e.target.value)}
+          />
+        </Field>
+        <Field
+          label="Bilgisayar adı öneki"
+          hint="LAB1 öneki LAB101, LAB102 … bilgisayarlarını kapsar. Oda adıyla birlikte verilirse ikisi de uygulanır."
+        >
+          <TextInput
+            className="w-full font-mono"
+            value={activePrefix}
+            placeholder="Tümü"
+            onChange={(e) => setActivePrefix(e.target.value.toUpperCase())}
+          />
+        </Field>
+        <div className="flex items-center gap-2 rounded bg-[var(--color-bg-2)] px-2.5 py-2">
+          <span className="flex-1 text-[11px] leading-snug text-[var(--color-text-2)]">
+            Açılıştaki laboratuvar seçim ekranını yeniden görmek isterseniz
+            sıfırlayın; konsol bir sonraki açılışta tekrar sorar.
+          </span>
+          <Button
+            onClick={async () => {
+              const ok = await guard(
+                api.updateSettings({ setupCompleted: false }),
+                "Açılışta yeniden sorulacak.",
+              );
+              if (ok !== undefined) onSaved();
+            }}
+          >
+            <RefreshCw size={13} /> Yeniden sor
+          </Button>
+        </div>
+        <Field
           label="Ek keşif adresleri"
-          hint="Okul ağı yayın paketlerini engelliyorsa alt ağların yayın adreslerini her satıra bir tane yazın."
+          hint="Okul ağı yayın paketlerini engelliyorsa her satıra bir hedef yazın: yayın adresi (192.168.1.255), tek IP, alan adı veya aralık (192.168.1.10-40, en fazla 254 adres)."
         >
           <textarea
             value={hosts}
@@ -663,6 +730,219 @@ export function LockDialog({
           görünür. Kilit ders bitince, bağlantı kopunca veya bir saat sonra
           kendiliğinden kalkar. <strong>Ctrl+Alt+Del engellenmez</strong> —
           öğrenci her zaman makineyi kurtarabilir.
+        </p>
+      </div>
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------- laboratuvar seçimi
+
+/**
+ * Açılışta hangi bilgisayarların yönetileceğini sorar.
+ *
+ * NetSupport'un Class Wizard'ındaki Room ve PC modlarının karşılığı: ölçüt
+ * **yazılır**, liste ondan sonra süzülür. Keşifte görülen odalar ve ön ekler
+ * altta öneri olarak durur ama zorunlu değildir — henüz açılmamış bir
+ * laboratuvarın adı da baştan girilebilir, makineler açıldıkça listeye
+ * düşerler.
+ *
+ * Yalnızca `setupCompleted` false iken çıkar; seçim Ayarlar'dan değişir.
+ */
+export function RoomPickerDialog({
+  open,
+  devices,
+  onPick,
+}: {
+  open: boolean;
+  devices: DeviceView[];
+  onPick: (secim: { room: string; prefix: string }) => void;
+}) {
+  const [mode, setMode] = useState<"room" | "prefix" | "all">("room");
+  const [room, setRoom] = useState("");
+  const [prefix, setPrefix] = useState("");
+
+  // Keşifte görülen odalar ve cihaz sayıları.
+  const odalar = useMemo(() => {
+    const sayac = new Map<string, number>();
+    for (const d of devices) {
+      const oda = d.room?.trim();
+      if (!oda) continue;
+      sayac.set(oda, (sayac.get(oda) ?? 0) + 1);
+    }
+    return [...sayac.entries()].sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "tr"),
+    );
+  }, [devices]);
+
+  // Bilgisayar adlarından çıkarılan ön ek adayları.
+  const onekler = useMemo(() => {
+    const sayac = new Map<string, number>();
+    for (const d of devices) {
+      const ad = d.hostname.trim().toUpperCase();
+      const rakam = ad.length - ad.replace(/\d+$/, "").length;
+      if (rakam === 0) continue;
+      for (let kalan = 0; kalan < rakam; kalan++) {
+        const aday = ad.slice(0, ad.length - rakam + kalan);
+        if (aday) sayac.set(aday, (sayac.get(aday) ?? 0) + 1);
+      }
+    }
+    return [...sayac.entries()]
+      .filter(([, n]) => n >= 2)
+      .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
+      .slice(0, 6);
+  }, [devices]);
+
+  const gecerli =
+    mode === "all" ||
+    (mode === "room" && room.trim().length > 0) ||
+    (mode === "prefix" && prefix.trim().length > 0);
+
+  function uygula() {
+    if (!gecerli) return;
+    onPick({
+      room: mode === "room" ? room.trim() : "",
+      prefix: mode === "prefix" ? prefix.trim() : "",
+    });
+  }
+
+  const sekmeler: { key: typeof mode; label: string }[] = [
+    { key: "room", label: "Laboratuvar adı" },
+    { key: "prefix", label: "Bilgisayar adı öneki" },
+    { key: "all", label: "Tümü" },
+  ];
+
+  return (
+    <Modal
+      open={open}
+      title="Hangi bilgisayarları yöneteceksiniz?"
+      onClose={() => onPick({ room: "", prefix: "" })}
+      footer={
+        <>
+          <Button onClick={() => onPick({ room: "", prefix: "" })}>Tümünü göster</Button>
+          <Button tone="accent" disabled={!gecerli} onClick={uygula}>
+            Devam
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3 p-3">
+        {/* Mod seçimi */}
+        <div role="tablist" className="flex gap-1 rounded bg-[var(--color-bg-2)] p-0.5">
+          {sekmeler.map((t) => (
+            <button
+              key={t.key}
+              role="tab"
+              aria-selected={mode === t.key}
+              onClick={() => setMode(t.key)}
+              className={`flex-1 rounded px-2 py-1.5 text-[11.5px] transition-colors
+                ${
+                  mode === t.key
+                    ? "bg-[var(--color-bg-1)] font-medium text-[var(--color-text)] shadow-sm"
+                    : "text-[var(--color-text-2)] hover:text-[var(--color-text)]"
+                }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {mode === "room" && (
+          <div className="space-y-2">
+            <Field
+              label="Laboratuvar adı"
+              hint="Öğrencilerin kendi bilgisayarlarında ilk kurulumda girdiği ad."
+            >
+              <TextInput
+                className="w-full"
+                value={room}
+                autoFocus
+                placeholder="Lab 1"
+                onChange={(e) => setRoom(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") uygula();
+                }}
+              />
+            </Field>
+            {odalar.length > 0 && (
+              <div>
+                <p className="mb-1 text-[11px] text-[var(--color-text-3)]">
+                  Ağda görülenler
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {odalar.map(([oda, adet]) => (
+                    <button
+                      key={oda}
+                      onClick={() => setRoom(oda)}
+                      className="rounded border border-[var(--color-stroke-strong)] px-2 py-1
+                        text-[11px] hover:border-[var(--color-accent)]
+                        hover:text-[var(--color-accent)]"
+                    >
+                      {oda}
+                      <span className="ml-1.5 text-[var(--color-text-3)]">{adet}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {mode === "prefix" && (
+          <div className="space-y-2">
+            <Field
+              label="Bilgisayar adı öneki"
+              hint="LAB1 öneki LAB101, LAB102 … bilgisayarlarını kapsar. Büyük/küçük harf fark etmez."
+            >
+              <TextInput
+                className="w-full font-mono"
+                value={prefix}
+                autoFocus
+                placeholder="LAB1"
+                onChange={(e) => setPrefix(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") uygula();
+                }}
+              />
+            </Field>
+            {onekler.length > 0 && (
+              <div>
+                <p className="mb-1 text-[11px] text-[var(--color-text-3)]">
+                  Ağdaki adlardan
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {onekler.map(([onek, adet]) => (
+                    <button
+                      key={onek}
+                      onClick={() => setPrefix(onek)}
+                      className="rounded border border-[var(--color-stroke-strong)] px-2 py-1
+                        font-mono text-[11px] hover:border-[var(--color-accent)]
+                        hover:text-[var(--color-accent)]"
+                    >
+                      {onek}
+                      <span className="ml-1.5 font-sans text-[var(--color-text-3)]">
+                        {adet}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {mode === "all" && (
+          <p className="rounded bg-[var(--color-bg-2)] p-2.5 text-[11.5px] leading-relaxed
+            text-[var(--color-text-2)]">
+            Ağda bulunan bütün öğrenci bilgisayarları listelenir. Süzmeyi
+            sonradan Ayarlar'dan veya arama kutusundan yapabilirsiniz.
+          </p>
+        )}
+
+        <p className="text-[11px] leading-relaxed text-[var(--color-text-3)]">
+          Ölçüt yazdığınız anda uygulanır; bilgisayarlar açıldıkça listeye
+          düşerler. Henüz hiçbir makine açılmamışken de ad girebilirsiniz.
+          Seçim Ayarlar'dan değiştirilebilir.
         </p>
       </div>
     </Modal>

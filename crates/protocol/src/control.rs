@@ -199,6 +199,33 @@ pub enum DeviceStatus {
     Rejected,
 }
 
+/// Öğretmenin dosyayı bırakacağı kök klasör.
+///
+/// **Serbest yol taşınmaz.** Öğretmen yalnızca bu üç kökten birini seçebilir;
+/// öğrenci tarafında her biri kullanıcının kendi klasörüne çözülür ve altına
+/// `OpenClass` eklenir. Böylece hedef seçilebilir olurken sistem dizinlerine
+/// yazma kapısı açılmaz — serbest metin bir yol alanı tam bunu yapardı.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileDestination {
+    /// Belgeler — 0.1.0 davranışı, alan gelmediğinde de bu kullanılır.
+    #[default]
+    Documents,
+    Desktop,
+    Downloads,
+}
+
+impl FileDestination {
+    /// Arayüzde ve bildirimlerde görünen Türkçe ad.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Documents => "Belgeler",
+            Self::Desktop => "Masaüstü",
+            Self::Downloads => "İndirilenler",
+        }
+    }
+}
+
 /// Öğrenci → öğretmen.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "t")]
@@ -212,6 +239,14 @@ pub enum ClientMessage {
         /// Daha önce eşleştiyse açık anahtar burada gelir; öğretmen kaydı bulur.
         #[serde(with = "serde_bytes")]
         public_key: Vec<u8>,
+        /// Öğrencinin ilk açılış sihirbazında girdiği laboratuvar/oda adı.
+        ///
+        /// `#[serde(default)]` **zorunludur**: 0.1.0 ajanları bu alanı hiç
+        /// göndermez ve alan zorunlu olsaydı çözümleme patlar, eski bütün
+        /// kurulumlar bağlanamaz hale gelirdi. Alanı göndermeyen cihazda
+        /// öğretmen kayıtlı odayı korur.
+        #[serde(default)]
+        room: Option<String>,
     },
 
     /// İlk eşleştirme talebi. Öğrenci, öğretmenin ekranındaki kodu kullanarak
@@ -381,19 +416,12 @@ pub enum ServerMessage {
         reset_pairing: bool,
     },
 
-    /// Ders oturumu başladı. Öğrenci arayüzü bunu görünür biçimde gösterir.
-    SessionStart {
-        session_id: Uuid,
-        teacher_name: String,
-        class_name: String,
-    },
-
-    /// Ders bitti. Öğrenci tüm yayınları durdurur.
-    SessionEnd {
-        session_id: Uuid,
-    },
-
-    /// Ekran yayınını başlat. Yalnızca aktif bir oturum içinde geçerlidir.
+    /// Ekran yayınını başlat.
+    ///
+    /// Öğrencide yayın **her zaman görünürdür**: tepsi simgesi değişir ve
+    /// "EKRANINIZ PAYLAŞILIYOR" göstergesi çıkar. Ders oturumu kavramı
+    /// kaldırıldığından bu gösterge tek koruma katmanıdır ve hiçbir mesajla
+    /// bastırılamaz.
     StartScreenStream {
         stream_id: u32,
         quality: StreamQuality,
@@ -453,6 +481,25 @@ pub enum ServerMessage {
         size: u64,
         /// Tamamlandığında doğrulanacak SHA-256 özeti.
         sha256: [u8; 32],
+        /// Dosyanın bırakılacağı kök klasör.
+        ///
+        /// `#[serde(default)]`: 0.1.0 öğretmeni bu alanı göndermez ve o
+        /// durumda Belgeler kullanılır — eski konsol yeni ajanla çalışmaya
+        /// devam eder.
+        #[serde(default)]
+        destination: FileDestination,
+        /// Kökün altındaki hedef klasör (`Ödevler/Hafta 3` gibi).
+        ///
+        /// **Göreli yoldur, mutlak yol değil.** Öğretmen hedefi bir
+        /// öğrencinin gezgininde seçer ama gönderim birden çok cihaza
+        /// gidebilir ve her makinede kullanıcı klasörü başka yerdedir;
+        /// taşınan değer bu yüzden köke göre görelidir. Her öğrenci onu
+        /// kendi kökünün altında çözer.
+        ///
+        /// Alıcı `..` içeren veya kök dışına çıkan değeri reddeder.
+        /// Boşsa dosya kökün altındaki `OpenClass` klasörüne iner.
+        #[serde(default)]
+        subpath: Option<String>,
     },
 
     /// Dosya parçası. Sıra numarası boşluk tespiti içindir.
@@ -796,5 +843,51 @@ mod arayuz_bicimi_testleri {
             sonuc.is_err(),
             "arayüz snake_case gönderiyor; PascalCase kabul edilmemeli"
         );
+    }
+
+    // ------------------------------------------------- Hello'nun oda alanı
+
+    #[test]
+    fn oda_alani_olmayan_hello_cozulur() {
+        // 0.1.0 ajanları `room` alanını hiç göndermez. Alan zorunlu olsaydı
+        // çözümleme burada patlar ve sahadaki bütün eski kurulumlar
+        // bağlanamaz hale gelirdi — sürüm atlamanın en pahalı hatası.
+        let eski_ajan = serde_json::json!({
+            "t": "Hello",
+            "protocol": crate::PROTOCOL_VERSION,
+            "device_id": "00000000-0000-4000-8000-000000000001",
+            "hostname": "LAB101",
+            "app_version": "0.1.0",
+            "public_key": vec![0u8; 32],
+        });
+        let msg: ClientMessage = serde_json::from_value(eski_ajan)
+            .expect("oda alanı olmayan Hello çözülebilmeli");
+        match msg {
+            ClientMessage::Hello { room, hostname, .. } => {
+                assert_eq!(room, None, "alan yoksa oda bilinmiyor olmalı");
+                assert_eq!(hostname, "LAB101");
+            }
+            other => panic!("Hello beklenirken {other:?} geldi"),
+        }
+    }
+
+    #[test]
+    fn oda_alani_tasinir() {
+        let msg = ClientMessage::Hello {
+            protocol: crate::PROTOCOL_VERSION,
+            device_id: Uuid::nil(),
+            hostname: "LAB101".into(),
+            app_version: "0.2.0".into(),
+            public_key: vec![3u8; 32],
+            room: Some("Lab 1".into()),
+        };
+        let geri: ClientMessage =
+            rmp_serde::from_slice(&rmp_serde::to_vec_named(&msg).unwrap()).unwrap();
+        match geri {
+            ClientMessage::Hello { room, .. } => {
+                assert_eq!(room.as_deref(), Some("Lab 1"));
+            }
+            other => panic!("Hello beklenirken {other:?} geldi"),
+        }
     }
 }

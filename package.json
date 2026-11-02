@@ -1,7 +1,7 @@
 {
   "name": "openclass",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "NetSupport School'a ücretsiz ve açık kaynak alternatif — sınıf yönetim yazılımı",
   "license": "GPL-3.0-or-later",
   "workspaces": [

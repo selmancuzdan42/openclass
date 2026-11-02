@@ -243,7 +243,8 @@ export function DetailsTable({
           text-[11px] text-[var(--color-text-2)]">
           <tr className="border-b border-[var(--color-stroke)]">
             <Th className="w-[180px]">Bilgisayar</Th>
-            <Th className="w-[160px]">Görünen ad</Th>
+            <Th className="w-[130px]">Oda</Th>
+            <Th className="w-[150px]">Görünen ad</Th>
             <Th className="w-[110px]">Bağlantı</Th>
             <Th className="w-[130px]">Yetki</Th>
             <Th className="w-[150px]">Adres</Th>
@@ -279,6 +280,7 @@ export function DetailsTable({
                     )}
                   </span>
                 </Td>
+                <Td className="text-[var(--color-text-2)]">{d.room ?? "—"}</Td>
                 <Td className="text-[var(--color-text-2)]">{d.displayName ?? "—"}</Td>
                 <Td className="text-[var(--color-text-2)]">
                   {d.online ? "Bağlı" : d.discovered ? "Ağda" : "Çevrimdışı"}

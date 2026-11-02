@@ -58,6 +58,16 @@ pub enum DiscoveryPacket {
         /// Cihaz daha önce bir öğretmenle eşleştiyse o öğretmenin kimliği.
         /// Konsol "yetkili / yetki bekliyor / başka öğretmene bağlı" ayrımı için kullanır.
         paired_to: Option<Uuid>,
+        /// Öğrencinin bildirdiği laboratuvar/oda adı. **Doğrulanmamış beyandır.**
+        ///
+        /// Keşif paketinde taşınması, öğretmenin bir odayı daha bağlantı
+        /// kurmadan süzebilmesi içindir: "Lab 1'i yönet" diyen konsol, o
+        /// odayı bildiren cihazları listeler. `Hello` ile gelen değerle aynı
+        /// kaynaktan okunur.
+        ///
+        /// `#[serde(default)]` zorunlu: 0.1.0 ajanları bu alanı göndermez.
+        #[serde(default)]
+        room: Option<String>,
     },
 }
 
@@ -231,6 +241,7 @@ mod tests {
             app_version: "0.1.0".into(),
             nonce: [7u8; 16],
             paired_to: None,
+            room: Some("Lab 1".into()),
         };
         let raw = p.encode().unwrap();
         assert!(raw.starts_with(MAGIC));
@@ -249,5 +260,30 @@ mod tests {
     #[test]
     fn yabanci_trafik_sessizce_elenir() {
         assert!(DiscoveryPacket::decode(b"rastgele zirva").is_none());
+    }
+
+    #[test]
+    fn oda_alani_olmayan_duyuru_cozulur() {
+        // 0.1.0 ajanları `room` göndermez. Alan zorunlu olsaydı eski
+        // kurulumlar keşifte hiç görünmezdi — sessiz ve teşhisi zor bir
+        // bozulma olurdu.
+        let eski = serde_json::json!({
+            "t": "StudentAnnounce",
+            "protocol": crate::PROTOCOL_VERSION,
+            "device_id": "00000000-0000-4000-8000-000000000001",
+            "hostname": "LAB101",
+            "app_version": "0.1.0",
+            "nonce": vec![0u8; 16],
+            "paired_to": null,
+        });
+        let paket: DiscoveryPacket =
+            serde_json::from_value(eski).expect("oda alanı olmayan duyuru çözülmeli");
+        match paket {
+            DiscoveryPacket::StudentAnnounce { room, hostname, .. } => {
+                assert_eq!(room, None);
+                assert_eq!(hostname, "LAB101");
+            }
+            other => panic!("StudentAnnounce beklenirken {other:?} geldi"),
+        }
     }
 }

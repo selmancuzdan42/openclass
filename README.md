@@ -2,7 +2,7 @@
 
 **NetSupport School'a ücretsiz ve açık kaynak alternatif.** Okul bilgisayar
 laboratuvarları için tasarlanmış sınıf yönetim yazılımı: öğretmen yerel ağdaki
-öğrenci bilgisayarlarını bulur, güvenli biçimde eşleştirir ve ders oturumu
+öğrenci bilgisayarlarını bulur, güvenli biçimde eşleştirir ve ders
 boyunca ekranlarını canlı izler.
 
 > **Durum:** v0.1 geliştirme aşamasında. Aşağıdaki "Mevcut durum" bölümü
@@ -91,8 +91,10 @@ Koyu tema ve ayrıntılı liste görünümü:
 5. Arama kutusuna bilgisayar adı (`LAB1`) veya IP parçası (`192.168.1.`)
    yazarak süzebilirsiniz.
 
-Ders oturumu konsol açıldığında kendiliğinden başlar. **Dersi Bitir** ile
-tüm yayınları, kilitleri ve uzaktan kontrolü bir kerede durdurabilirsiniz.
+Ayrı bir "ders başlat" adımı yoktur: konsol açıkken bağlanan bilgisayarların
+önizlemesi gelir, konsolu kapatınca yayın durur. Öğrenci ekranının
+paylaşıldığını her zaman görür — tepsi simgesi değişir ve "EKRANINIZ
+PAYLAŞILIYOR" göstergesi çıkar.
 
 ### Öğrenci (kurulumu öğretmen/yönetici yapar)
 

@@ -33,7 +33,7 @@ taklit edilmez.
 
 | Bölge | İçerik | Neden |
 |---|---|---|
-| **Başlık çubuğu** | Sınıf adı, ders süresi, "Dersi Başlat/Bitir", yardım talebi sayacı | En sık kullanılan iki eylem her sekmeden erişilebilir olmalı |
+| **Başlık çubuğu** | Sınıf adı, yardım talebi sayacı, yayın göstergesi | Durum bilgisi her sekmeden görünür olmalı |
 | **Komut şeridi** | Sekmelere ve adlandırılmış gruplara ayrılmış komutlar | Öğretmen aradığı komutu ezberden bulur; menü avı yok |
 | **Grup çubuğu** | Laboratuvar sekmeleri, her biri `bağlı/toplam` sayısıyla | Hangi laboratuvarın ne durumda olduğu tek bakışta |
 | **Arama satırı** | Ön ek araması (`LAB1`) | Şartnamenin açık gereksinimi; grup çubuğuyla birlikte çalışır |
@@ -147,7 +147,7 @@ npm run dev --workspace @openclass/student   # ?view=notice → mesaj penceresi
 ```
 
 Tauri köprüsü bulunmadığında `src/dev-mock.ts` devreye girer ve örnek bir
-sınıf (LAB101–LAB204, yardım talepleri, açık ders oturumu) üretir. Bu kod
+sınıf (LAB101–LAB204, yardım talepleri, oda adları) üretir. Bu kod
 `import.meta.env.DEV` ile korunur; üretim derlemesine girmez.
 
 Başsız tarayıcıyla ekran görüntüsü alırken adrese `?shot=1` ekleyin; geliştirme

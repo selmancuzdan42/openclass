@@ -76,6 +76,11 @@ export function ConfigWindow() {
 
   const paired = snapshot.status.kind !== "notPaired";
 
+  // İlk kurulum: oda adı da eşleştirme de yoksa sihirbaz gösterilir.
+  if (!snapshot.room && !paired) {
+    return <SetupWizard snapshot={snapshot} onChanged={refresh} />;
+  }
+
   return (
     <div className="flex h-full flex-col bg-[var(--color-canvas)]">
       <header className="flex h-[40px] shrink-0 items-center gap-2 border-b
@@ -96,6 +101,7 @@ export function ConfigWindow() {
 
       <main className="min-h-0 flex-1 space-y-2 overflow-auto p-2.5">
         <DeviceCard snapshot={snapshot} />
+        <RoomCard snapshot={snapshot} onChanged={refresh} />
         <AutostartCard />
         <StatusCard snapshot={snapshot} onRefresh={refresh} />
         {paired ? (
@@ -129,6 +135,156 @@ export function ConfigWindow() {
             Kapat
           </Button>
         </div>
+      </footer>
+    </div>
+  );
+}
+
+
+// -------------------------------------------------------------- ilk açılış
+
+/**
+ * İlk açılış sihirbazı.
+ *
+ * Yalnızca **hem** oda adı **hem** eşleştirme yokken açılır. Koşul bilerek bu
+ * kadar dar: 0.1.0'dan yükselen ve zaten eşleşmiş bir ajanda oda alanı boştur,
+ * daha geniş bir koşul bütün sınıfı yükseltme sonrası sihirbaz ekranına
+ * düşürürdü. O cihazlarda oda `null` kalır ve öğretmen listesinde "—" görünür;
+ * oda adı yapılandırma penceresinden sonradan girilebilir.
+ *
+ * Adım 1 burada, adım 2–3 `PairingCard` içinde. Yarıda kapatılırsa yalnızca
+ * kaydedilmiş adımlar kalır: oda adı diske yazılmıştır, eşleştirme değil.
+ */
+function SetupWizard({
+  snapshot,
+  onChanged,
+}: {
+  snapshot: StatusSnapshot;
+  onChanged: () => void;
+}) {
+  const { theme, toggle } = useTheme();
+  const { guard } = useToast();
+  const [room, setRoom] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // Oda kaydedildiyse ikinci adıma geçilmiş olur.
+  const step = snapshot.room ? 2 : 1;
+
+  async function saveRoom() {
+    const temiz = room.trim();
+    if (!temiz) return;
+    setBusy(true);
+    const ok = await guard(api.setRoom(temiz), `Oda adı kaydedildi: ${temiz}`);
+    setBusy(false);
+    if (ok !== undefined) onChanged();
+  }
+
+  return (
+    <div className="flex h-full flex-col bg-[var(--color-canvas)]">
+      <header className="flex h-[40px] shrink-0 items-center gap-2 border-b
+        border-[var(--color-stroke)] bg-[var(--color-chrome)] px-3">
+        <Cast size={16} className="text-[var(--color-accent)]" />
+        <div className="min-w-0">
+          <p className="truncate text-[12.5px] font-semibold leading-tight">
+            OpenClass Öğrenci — ilk kurulum
+          </p>
+          <p className="truncate text-[11px] leading-tight text-[var(--color-text-2)]">
+            {step}. adım / 2 · {snapshot.hostname}
+          </p>
+        </div>
+        <IconButton label="Temayı değiştir" onClick={toggle} className="ml-auto">
+          {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+        </IconButton>
+      </header>
+
+      {/* Adım göstergesi */}
+      <div className="flex shrink-0 gap-1 px-2.5 pt-2.5">
+        {[1, 2].map((n) => (
+          <div
+            key={n}
+            className={`h-[3px] flex-1 rounded-full ${
+              n <= step ? "bg-[var(--color-accent)]" : "bg-[var(--color-stroke)]"
+            }`}
+          />
+        ))}
+      </div>
+
+      <main className="min-h-0 flex-1 space-y-2 overflow-auto p-2.5">
+        {step === 1 ? (
+          <Card title="Bu bilgisayar hangi laboratuvarda?">
+            <div className="space-y-3 px-3 py-2.5">
+              <p className="text-[11.5px] leading-relaxed text-[var(--color-text-2)]">
+                Öğretmen konsolu bilgisayarları bu ada göre gruplar. Aynı
+                laboratuvardaki bütün bilgisayarlara <strong>aynı adı</strong>{" "}
+                yazın — örneğin <code>Lab 1</code> veya <code>201 Nolu Atölye</code>.
+              </p>
+
+              <Field label="Laboratuvar / oda adı">
+                <TextInput
+                  className="w-full"
+                  value={room}
+                  maxLength={64}
+                  autoFocus
+                  placeholder="Lab 1"
+                  onChange={(e) => setRoom(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void saveRoom();
+                  }}
+                />
+              </Field>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  tone="accent"
+                  disabled={!room.trim() || busy}
+                  onClick={() => void saveRoom()}
+                >
+                  Kaydet ve devam et
+                </Button>
+                <Button
+                  tone="subtle"
+                  disabled={busy}
+                  title="Oda adı sonradan yapılandırma penceresinden girilebilir"
+                  onClick={() => void guard(api.setRoom("")).then(onChanged)}
+                >
+                  Şimdilik atla
+                </Button>
+              </div>
+
+              <p className="rounded bg-[var(--color-surface)] p-2.5 text-[11px]
+                leading-relaxed text-[var(--color-text-3)]">
+                Bu ad yalnızca listelemeye yarar; yetki kararında kullanılmaz.
+                Öğretmen yine de her bilgisayarı tek tek eşleştirmek zorundadır.
+              </p>
+            </div>
+          </Card>
+        ) : (
+          <>
+            <Card title="Laboratuvar">
+              <div className="flex items-center gap-2 px-3 py-2.5">
+                <ShieldCheck size={14} className="text-[var(--color-ok)]" />
+                <span className="text-[12px]">{snapshot.room}</span>
+                <Button
+                  tone="subtle"
+                  className="ml-auto"
+                  onClick={() => void guard(api.setRoom("")).then(onChanged)}
+                >
+                  Değiştir
+                </Button>
+              </div>
+            </Card>
+            <PairingCard onPaired={onChanged} />
+          </>
+        )}
+      </main>
+
+      <footer className="shrink-0 border-t border-[var(--color-stroke)]
+        bg-[var(--color-surface)] px-3 py-2">
+        <p className="text-[10.5px] leading-snug text-[var(--color-text-3)]">
+          Kurulum bitince bu pencere kapatılabilir; ajan sistem tepsisinde
+          çalışmaya devam eder. Eşleştirme tamamlanmadan öğretmen bu
+          bilgisayarı yönetemez.
+        </p>
       </footer>
     </div>
   );
@@ -211,6 +367,73 @@ function DeviceCard({ snapshot }: { snapshot: StatusSnapshot }) {
   );
 }
 
+// ----------------------------------------------------------------------- oda
+
+/**
+ * Laboratuvar/oda adı — sihirbaz atlandıysa veya oda değiştiyse buradan girilir.
+ *
+ * 0.1.0'dan yükselen cihazlarda bu alan boş gelir; öğretmen listesinde "—"
+ * görünür. Değer burada girilince bir sonraki bağlantıda öğretmene bildirilir.
+ */
+function RoomCard({
+  snapshot,
+  onChanged,
+}: {
+  snapshot: StatusSnapshot;
+  onChanged: () => void;
+}) {
+  const { guard } = useToast();
+  const [room, setRoom] = useState(snapshot.room ?? "");
+  const [busy, setBusy] = useState(false);
+
+  // Dışarıdan değişirse (sihirbaz, başka pencere) alan tazelensin.
+  useEffect(() => {
+    setRoom(snapshot.room ?? "");
+  }, [snapshot.room]);
+
+  const degisti = room.trim() !== (snapshot.room ?? "");
+
+  async function kaydet() {
+    setBusy(true);
+    const ok = await guard(
+      api.setRoom(room.trim()),
+      room.trim() ? `Oda adı kaydedildi: ${room.trim()}` : "Oda adı temizlendi.",
+    );
+    setBusy(false);
+    if (ok !== undefined) onChanged();
+  }
+
+  return (
+    <Card title="Laboratuvar / oda">
+      <div className="space-y-2 px-3 py-2.5">
+        <p className="text-[11px] leading-relaxed text-[var(--color-text-2)]">
+          Öğretmen konsolu bilgisayarları bu ada göre gruplar. Aynı
+          laboratuvardaki bütün bilgisayarlara aynı adı yazın.
+        </p>
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <Field label="Oda adı">
+              <TextInput
+                className="w-full"
+                value={room}
+                maxLength={64}
+                placeholder="Lab 1"
+                onChange={(e) => setRoom(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && degisti) void kaydet();
+                }}
+              />
+            </Field>
+          </div>
+          <Button tone="accent" disabled={!degisti || busy} onClick={() => void kaydet()}>
+            Kaydet
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 // -------------------------------------------------------------------- durum
 
 function StatusCard({
@@ -229,11 +452,6 @@ function StatusCard({
         <span className={`mt-1 size-[9px] shrink-0 rounded-full ${dot}`} />
         <div className="min-w-0 flex-1">
           <p className="text-[12.5px] font-medium leading-tight">{text}</p>
-          {snapshot.session && (
-            <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-2)]">
-              Ders açık: {snapshot.session.className}
-            </p>
-          )}
           <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--color-text-3)]">
             <Monitor size={11} />
             {snapshot.sharing.active

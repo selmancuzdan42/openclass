@@ -29,6 +29,12 @@ pub struct StudentConfig {
     pub paired_teacher: Option<PairedTeacher>,
     /// Keşfin engellendiği ağlarda elle girilen öğretmen adresi (`ip` veya `ip:port`).
     pub manual_teacher_address: Option<String>,
+    /// Bu bilgisayarın bulunduğu laboratuvar/oda adı.
+    ///
+    /// İlk açılış sihirbazında sorulur ve `Hello` ile öğretmene bildirilir;
+    /// öğretmen cihazları buna göre gruplayabilir. Yapı `#[serde(default)]`
+    /// taşıdığı için alanı bilmeyen eski yapılandırma dosyaları bozulmaz.
+    pub room: Option<String>,
 }
 
 impl StudentConfig {
@@ -103,6 +109,7 @@ mod tests {
                 cert_fingerprint: vec![0xAB, 0xCD, 0x01],
             }),
             manual_teacher_address: None,
+            room: Some("Lab 1".into()),
         };
         let json = serde_json::to_string(&cfg).unwrap();
         assert!(

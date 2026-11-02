@@ -4,7 +4,6 @@
 //!
 //! * **devices** — eşleştirilmiş cihazlar ve açık anahtarları. Bir cihazın
 //!   yönetilebilir olmasının tek kaynağı bu tablodur; hostname beyanı değil.
-//! * **sessions** — ders oturumlarının başlangıç/bitişi.
 //! * **audit** — denetim kayıtları.
 //!
 //! Hassas veri saklanmaz: ekran görüntüleri diske hiç yazılmaz, eşleştirme
@@ -30,6 +29,11 @@ pub struct DeviceRecord {
     pub status: DeviceStatus,
     pub paired_at: i64,
     pub last_seen: i64,
+    /// Öğrencinin bildirdiği laboratuvar/oda adı.
+    ///
+    /// İlk açılış sihirbazında girilir. 0.1.0'dan yükselen ajanlar bu alanı
+    /// göndermez; o cihazlarda `None` kalır ve arayüzde "—" görünür.
+    pub room: Option<String>,
 }
 
 /// Denetim kaydı kategorileri.
@@ -44,8 +48,6 @@ pub enum AuditKind {
     DeviceConnected,
     DeviceDisconnected,
     AuthFailed,
-    SessionStarted,
-    SessionEnded,
     ScreenStreamStarted,
     ScreenStreamStopped,
     NoticeSent,
@@ -69,8 +71,6 @@ impl AuditKind {
             Self::DeviceConnected => "device_connected",
             Self::DeviceDisconnected => "device_disconnected",
             Self::AuthFailed => "auth_failed",
-            Self::SessionStarted => "session_started",
-            Self::SessionEnded => "session_ended",
             Self::ScreenStreamStarted => "screen_stream_started",
             Self::ScreenStreamStopped => "screen_stream_stopped",
             Self::NoticeSent => "notice_sent",
@@ -156,7 +156,8 @@ impl Db {
     }
 
     fn migrate(&self) -> Result<()> {
-        self.conn.lock().execute_batch(
+        let conn = self.conn.lock();
+        conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS devices (
                 device_id    TEXT PRIMARY KEY NOT NULL,
@@ -165,16 +166,11 @@ impl Db {
                 public_key   BLOB NOT NULL,
                 status       TEXT NOT NULL,
                 paired_at    INTEGER NOT NULL,
-                last_seen    INTEGER NOT NULL
+                last_seen    INTEGER NOT NULL,
+                room         TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_devices_hostname ON devices(hostname);
 
-            CREATE TABLE IF NOT EXISTS sessions (
-                session_id TEXT PRIMARY KEY NOT NULL,
-                class_name TEXT NOT NULL,
-                started_at INTEGER NOT NULL,
-                ended_at   INTEGER
-            );
 
             CREATE TABLE IF NOT EXISTS audit (
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -186,6 +182,27 @@ impl Db {
             CREATE INDEX IF NOT EXISTS idx_audit_at ON audit(at DESC);
             "#,
         )?;
+
+        // Yukarıdaki `CREATE TABLE IF NOT EXISTS` yalnızca **yeni** kurulumu
+        // kurar. Var olan bir veritabanında tablo zaten durduğu için gövdeye
+        // sütun eklemek hiçbir şey yapmaz; eksik sütun ancak `ALTER TABLE` ile
+        // gelir. Bu yüzden şema sürümü `PRAGMA user_version` ile izlenir.
+        //
+        // Tablolar **hiçbir koşulda** silinip yeniden kurulmaz: `devices`
+        // kaybı bütün sınıfın yeniden eşleştirilmesi demektir.
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+
+        if version < 1 {
+            // 1 → `devices.room`: öğrencinin bulunduğu laboratuvar/oda adı.
+            // Sütun varlığı ayrıca sınanır; böylece adım yarıda kesilmiş bir
+            // veritabanında (sütun eklendi, sürüm yazılamadı) ikinci açılış
+            // "duplicate column" ile düşmez.
+            if !column_exists(&conn, "devices", "room")? {
+                conn.execute("ALTER TABLE devices ADD COLUMN room TEXT", [])?;
+            }
+            conn.pragma_update(None, "user_version", 1)?;
+        }
+
         Ok(())
     }
 
@@ -199,20 +216,22 @@ impl Db {
         device_id: Uuid,
         hostname: &str,
         public_key: &[u8; 32],
+        room: Option<&str>,
     ) -> Result<()> {
         let ts = now();
         self.conn.lock().execute(
             r#"
-            INSERT INTO devices (device_id, hostname, display_name, public_key, status, paired_at, last_seen)
-            VALUES (?1, ?2, NULL, ?3, 'authorized', ?4, ?4)
+            INSERT INTO devices (device_id, hostname, display_name, public_key, status, paired_at, last_seen, room)
+            VALUES (?1, ?2, NULL, ?3, 'authorized', ?4, ?4, ?5)
             ON CONFLICT(device_id) DO UPDATE SET
                 hostname   = excluded.hostname,
                 public_key = excluded.public_key,
                 status     = 'authorized',
                 paired_at  = excluded.paired_at,
-                last_seen  = excluded.last_seen
+                last_seen  = excluded.last_seen,
+                room       = COALESCE(excluded.room, devices.room)
             "#,
-            params![device_id.to_string(), hostname, public_key.as_slice(), ts],
+            params![device_id.to_string(), hostname, public_key.as_slice(), ts, room],
         )?;
         Ok(())
     }
@@ -222,7 +241,7 @@ impl Db {
         let conn = self.conn.lock();
         let rec = conn
             .query_row(
-                "SELECT device_id, hostname, display_name, public_key, status, paired_at, last_seen
+                "SELECT device_id, hostname, display_name, public_key, status, paired_at, last_seen, room
                  FROM devices WHERE device_id = ?1",
                 params![device_id.to_string()],
                 row_to_device,
@@ -237,7 +256,7 @@ impl Db {
     pub fn all_devices(&self) -> Result<Vec<DeviceRecord>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT device_id, hostname, display_name, public_key, status, paired_at, last_seen
+            "SELECT device_id, hostname, display_name, public_key, status, paired_at, last_seen, room
              FROM devices ORDER BY hostname ASC",
         )?;
         let rows = stmt.query_map([], row_to_device)?;
@@ -251,11 +270,22 @@ impl Db {
         Ok(out)
     }
 
-    /// Cihazın son görülme zamanını ve bilgisayar adını tazeler.
-    pub fn touch_device(&self, device_id: Uuid, hostname: &str) -> Result<()> {
+    /// Cihazın son görülme zamanını, bilgisayar adını ve odasını tazeler.
+    ///
+    /// `room` `None` geldiğinde kayıtlı oda **korunur**: alanı göndermeyen
+    /// eski sürüm bir ajanın bağlanması, öğretmenin elindeki oda bilgisini
+    /// silmemelidir.
+    pub fn touch_device(
+        &self,
+        device_id: Uuid,
+        hostname: &str,
+        room: Option<&str>,
+    ) -> Result<()> {
         self.conn.lock().execute(
-            "UPDATE devices SET last_seen = ?2, hostname = ?3 WHERE device_id = ?1",
-            params![device_id.to_string(), now(), hostname],
+            "UPDATE devices
+                SET last_seen = ?2, hostname = ?3, room = COALESCE(?4, room)
+              WHERE device_id = ?1",
+            params![device_id.to_string(), now(), hostname, room],
         )?;
         Ok(())
     }
@@ -274,24 +304,6 @@ impl Db {
         self.conn.lock().execute(
             "UPDATE devices SET display_name = ?2 WHERE device_id = ?1",
             params![device_id.to_string(), name],
-        )?;
-        Ok(())
-    }
-
-    // --------------------------------------------------------------- oturumlar
-
-    pub fn start_session(&self, session_id: Uuid, class_name: &str) -> Result<()> {
-        self.conn.lock().execute(
-            "INSERT INTO sessions (session_id, class_name, started_at, ended_at) VALUES (?1, ?2, ?3, NULL)",
-            params![session_id.to_string(), class_name, now()],
-        )?;
-        Ok(())
-    }
-
-    pub fn end_session(&self, session_id: Uuid) -> Result<()> {
-        self.conn.lock().execute(
-            "UPDATE sessions SET ended_at = ?2 WHERE session_id = ?1 AND ended_at IS NULL",
-            params![session_id.to_string(), now()],
         )?;
         Ok(())
     }
@@ -341,6 +353,23 @@ impl Db {
 ///
 /// Dış katman `Result<Result<..>>` görür: dıştaki SQLite hatası, içteki
 /// bozuk veri (ör. 32 bayt olmayan açık anahtar). Bozuk satır atlanır,
+/// Bir tabloda sütunun var olup olmadığını söyler.
+///
+/// Şema geçişlerini yeniden çalıştırılabilir kılar: sütun zaten varsa
+/// `ALTER TABLE` atlanır. Tablo adı yalnızca kod içinden geldiği için
+/// biçimlendirme ile sorguya konur (`PRAGMA table_info` parametre almaz).
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// tüm sorgu düşmez.
 #[allow(clippy::type_complexity)]
 fn row_to_device(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<Option<DeviceRecord>>> {
@@ -351,6 +380,7 @@ fn row_to_device(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<Option<Devi
     let status_text: String = row.get(4)?;
     let paired_at: i64 = row.get(5)?;
     let last_seen: i64 = row.get(6)?;
+    let room: Option<String> = row.get(7)?;
 
     Ok((|| {
         let device_id = match Uuid::parse_str(&id_text) {
@@ -373,6 +403,7 @@ fn row_to_device(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<Option<Devi
             display_name,
             public_key,
             status: status_from_str(&status_text),
+            room,
             paired_at,
             last_seen,
         }))
@@ -387,7 +418,7 @@ mod tests {
     fn eslestirilen_cihaz_kaydedilir_ve_okunur() {
         let db = Db::open_in_memory().unwrap();
         let id = Uuid::new_v4();
-        db.upsert_paired_device(id, "LAB101", &[1u8; 32]).unwrap();
+        db.upsert_paired_device(id, "LAB101", &[1u8; 32], None).unwrap();
 
         let rec = db.device(id).unwrap().unwrap();
         assert_eq!(rec.hostname, "LAB101");
@@ -399,8 +430,8 @@ mod tests {
     fn yeniden_eslestirme_acik_anahtari_gunceller() {
         let db = Db::open_in_memory().unwrap();
         let id = Uuid::new_v4();
-        db.upsert_paired_device(id, "LAB101", &[1u8; 32]).unwrap();
-        db.upsert_paired_device(id, "LAB105", &[2u8; 32]).unwrap();
+        db.upsert_paired_device(id, "LAB101", &[1u8; 32], None).unwrap();
+        db.upsert_paired_device(id, "LAB105", &[2u8; 32], None).unwrap();
 
         let rec = db.device(id).unwrap().unwrap();
         assert_eq!(rec.public_key, [2u8; 32]);
@@ -416,7 +447,7 @@ mod tests {
     fn yetki_kaldirilan_cihaz_reddedilmis_olur() {
         let db = Db::open_in_memory().unwrap();
         let id = Uuid::new_v4();
-        db.upsert_paired_device(id, "LAB101", &[1u8; 32]).unwrap();
+        db.upsert_paired_device(id, "LAB101", &[1u8; 32], None).unwrap();
         db.revoke_device(id).unwrap();
         assert_eq!(
             db.device(id).unwrap().unwrap().status,
@@ -439,29 +470,20 @@ mod tests {
             Some(id),
             Some("LAB101 eşleştirildi"),
         );
-        db.audit(AuditKind::SessionStarted, None, Some("Lab 1"));
+        db.audit(AuditKind::NoticeSent, None, Some("Tahtaya bakın"));
 
         let entries = db.recent_audit(10).unwrap();
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].kind, "session_started");
+        assert_eq!(entries[0].kind, "notice_sent");
         assert_eq!(entries[1].device_id, Some(id));
     }
 
-    #[test]
-    fn oturum_baslatilip_bitirilebilir() {
-        let db = Db::open_in_memory().unwrap();
-        let sid = Uuid::new_v4();
-        db.start_session(sid, "Lab 1").unwrap();
-        db.end_session(sid).unwrap();
-        // İkinci kez bitirmek sessizce hiçbir satırı etkilemez.
-        db.end_session(sid).unwrap();
-    }
 
     #[test]
     fn bozuk_satir_tum_sorguyu_dusurmez() {
         let db = Db::open_in_memory().unwrap();
         let saglam = Uuid::new_v4();
-        db.upsert_paired_device(saglam, "LAB101", &[1u8; 32])
+        db.upsert_paired_device(saglam, "LAB101", &[1u8; 32], None)
             .unwrap();
         // Açık anahtarı 32 bayt olmayan bozuk bir satır elle eklenir.
         db.conn
@@ -476,5 +498,217 @@ mod tests {
         let devices = db.all_devices().unwrap();
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].device_id, saglam);
+    }
+
+    // ------------------------------------------------------------ şema geçişi
+
+    /// 0.1.0 şemasını **elle** kurar: `room` sütunu ve `user_version` yok.
+    ///
+    /// Amaç, yükseltmeyi gerçekten yaşatmak. `Db::open` zaten güncel şemayı
+    /// kuracağı için geçiş hiç çalışmaz; eski hali ancak böyle üretilir.
+    fn eski_surum_veritabani(path: &Path) -> Connection {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE devices (
+                device_id    TEXT PRIMARY KEY NOT NULL,
+                hostname     TEXT NOT NULL,
+                display_name TEXT,
+                public_key   BLOB NOT NULL,
+                status       TEXT NOT NULL,
+                paired_at    INTEGER NOT NULL,
+                last_seen    INTEGER NOT NULL
+            );
+            CREATE TABLE sessions (
+                session_id TEXT PRIMARY KEY NOT NULL,
+                class_name TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                ended_at   INTEGER
+            );
+            CREATE TABLE audit (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                at        INTEGER NOT NULL,
+                kind      TEXT NOT NULL,
+                device_id TEXT,
+                detail    TEXT
+            );
+            "#,
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn gecis_eslestirmeleri_korur_ve_oda_sutununu_ekler() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ogretmen.db");
+
+        // Eski sürümde eşleşmiş iki cihaz.
+        let eski = eski_surum_veritabani(&path);
+        let id1 = Uuid::new_v4();
+        let id2 = Uuid::new_v4();
+        for (id, host, key) in [(id1, "LAB101", 1u8), (id2, "LAB102", 2u8)] {
+            eski.execute(
+                "INSERT INTO devices
+                   (device_id, hostname, display_name, public_key, status, paired_at, last_seen)
+                 VALUES (?1, ?2, NULL, ?3, 'authorized', 100, 100)",
+                params![id.to_string(), host, [key; 32].as_slice()],
+            )
+            .unwrap();
+        }
+        let surum_once: i64 = eski
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(surum_once, 0, "eski veritabanında şema sürümü 0 olmalı");
+        drop(eski);
+
+        // Yükseltme.
+        let db = Db::open(&path).unwrap();
+
+        // 1. Eşleştirmeler yerinde mi? Bu testin asıl sebebi: `devices`
+        //    kaybı bütün sınıfın yeniden eşleştirilmesi demek.
+        let kayitlar = db.all_devices().unwrap();
+        assert_eq!(kayitlar.len(), 2, "cihaz kayıtları korunmalı");
+        let rec1 = db.device(id1).unwrap().unwrap();
+        assert_eq!(rec1.hostname, "LAB101");
+        assert_eq!(rec1.public_key, [1u8; 32], "açık anahtar korunmalı");
+        assert_eq!(rec1.status, DeviceStatus::Authorized);
+        assert_eq!(rec1.paired_at, 100, "eşleştirme zamanı korunmalı");
+
+        // 2. Yeni sütun geldi ve eski kayıtlarda boş.
+        assert_eq!(rec1.room, None, "eski kayıtta oda bilinmiyor");
+
+        // 3. Şema sürümü yazıldı.
+        let surum: i64 = db
+            .conn
+            .lock()
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(surum, 1);
+    }
+
+    #[test]
+    fn gecis_iki_kez_kosulabilir() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ogretmen.db");
+
+        let eski = eski_surum_veritabani(&path);
+        let id = Uuid::new_v4();
+        eski.execute(
+            "INSERT INTO devices
+               (device_id, hostname, display_name, public_key, status, paired_at, last_seen)
+             VALUES (?1, 'LAB101', NULL, ?2, 'authorized', 100, 100)",
+            params![id.to_string(), [7u8; 32].as_slice()],
+        )
+        .unwrap();
+        drop(eski);
+
+        // Üst üste üç açılış: ikinci ve üçüncüsü "duplicate column" ile
+        // düşmemeli, kayıt da bozulmamalı.
+        for tur in 1..=3 {
+            let db = Db::open(&path).unwrap();
+            let rec = db.device(id).unwrap().unwrap();
+            assert_eq!(rec.public_key, [7u8; 32], "{tur}. açılışta kayıt bozuldu");
+            assert_eq!(db.all_devices().unwrap().len(), 1);
+        }
+    }
+
+    #[test]
+    fn yarim_kalmis_gecis_tamamlanir() {
+        // Sütun eklendi ama `user_version` yazılamadı (ör. elektrik kesildi).
+        // Sütun varlık kontrolü olmasa ikinci açılış `ALTER TABLE` ile
+        // "duplicate column name: room" verip ajanı hiç açtırmazdı.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ogretmen.db");
+
+        let eski = eski_surum_veritabani(&path);
+        eski.execute("ALTER TABLE devices ADD COLUMN room TEXT", [])
+            .unwrap();
+        let surum: i64 = eski
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(surum, 0, "sürüm hâlâ 0 olmalı — geçiş yarım kaldı");
+        drop(eski);
+
+        let db = Db::open(&path).unwrap();
+        let surum: i64 = db
+            .conn
+            .lock()
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(surum, 1, "yarım kalan geçiş tamamlanmalı");
+    }
+
+    #[test]
+    fn oda_adi_kaydedilir_ve_eski_ajan_odayi_silmez() {
+        let db = Db::open_in_memory().unwrap();
+        let id = Uuid::new_v4();
+
+        // Eşleştirme sırasında oda gelir.
+        db.upsert_paired_device(id, "LAB101", &[1u8; 32], Some("Lab 1"))
+            .unwrap();
+        assert_eq!(db.device(id).unwrap().unwrap().room.as_deref(), Some("Lab 1"));
+
+        // Oda adını göndermeyen (0.1.0) bir ajan bağlanırsa kayıtlı oda
+        // KORUNUR. Aksi halde eski bir ajanın tek bağlantısı öğretmenin
+        // elindeki oda bilgisini silerdi.
+        db.touch_device(id, "LAB101", None).unwrap();
+        assert_eq!(
+            db.device(id).unwrap().unwrap().room.as_deref(),
+            Some("Lab 1"),
+            "alanı göndermeyen ajan kayıtlı odayı silmemeli"
+        );
+
+        // Yeni oda adı gelirse güncellenir.
+        db.touch_device(id, "LAB101", Some("Lab 2")).unwrap();
+        assert_eq!(db.device(id).unwrap().unwrap().room.as_deref(), Some("Lab 2"));
+
+        // Yeniden eşleşmede de aynı kural geçerli.
+        db.upsert_paired_device(id, "LAB101", &[1u8; 32], None)
+            .unwrap();
+        assert_eq!(
+            db.device(id).unwrap().unwrap().room.as_deref(),
+            Some("Lab 2"),
+            "yeniden eşleşmede oda gönderilmezse kayıtlı değer kalmalı"
+        );
+    }
+
+    /// Gerçek bir veritabanı üzerinde geçişi dener.
+    ///
+    /// Sentetik testler şemayı doğrular ama sahadaki dosya başka sürprizler
+    /// taşıyabilir (WAL kalıntısı, elle düzenlenmiş satır, bozuk anahtar).
+    /// Yükseltme öncesi bir kez elle koşulur — **kopya üzerinde**:
+    ///
+    /// ```text
+    /// cp ~/.local/share/.../openclass.db /tmp/kopya.db
+    /// OPENCLASS_GERCEK_DB=/tmp/kopya.db \
+    ///   cargo test -p openclass-teacher --lib gercek_veritabani -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "gerçek veritabanı yolu gerektirir"]
+    fn gercek_veritabani_yukseltilir() {
+        let Ok(yol) = std::env::var("OPENCLASS_GERCEK_DB") else {
+            panic!("OPENCLASS_GERCEK_DB verilmedi");
+        };
+        let path = Path::new(&yol);
+        let db = Db::open(path).expect("gerçek veritabanı açılmalı");
+
+        let cihazlar = db.all_devices().expect("cihazlar okunabilmeli");
+        eprintln!("geçiş sonrası {} cihaz:", cihazlar.len());
+        for c in &cihazlar {
+            eprintln!(
+                "  {} | yetki={:?} | oda={:?}",
+                c.hostname, c.status, c.room
+            );
+        }
+
+        let surum: i64 = db
+            .conn
+            .lock()
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        eprintln!("şema sürümü: {surum}");
+        assert_eq!(surum, 1, "şema sürümü yazılmalı");
+        assert!(!cihazlar.is_empty(), "eşleştirmeler korunmalı");
     }
 }

@@ -2925,7 +2925,7 @@ dependencies = [
 
 [[package]]
 name = "openclass-common"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "directories",
@@ -2946,7 +2946,7 @@ dependencies = [
 
 [[package]]
 name = "openclass-protocol"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chacha20poly1305",
  "ed25519-dalek",
@@ -2965,7 +2965,7 @@ dependencies = [
 
 [[package]]
 name = "openclass-screen"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "image",
@@ -2978,7 +2978,7 @@ dependencies = [
 
 [[package]]
 name = "openclass-student"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "directories",
@@ -3008,7 +3008,7 @@ dependencies = [
 
 [[package]]
 name = "openclass-teacher"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bytes",

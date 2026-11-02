@@ -22,26 +22,50 @@ kod üretin. Eşleştirme bir kez yapılır; IP değişse bile tekrarlanmaz.
 
 ## Ders yürütme
 
-### 1. Dersi başlat
+Ayrı bir "ders başlat" adımı yoktur. Konsol açıldığında bağlanan
+bilgisayarların ekran önizlemesi kendiliğinden gelir; konsolu kapattığınızda
+yayın durur.
 
-Üst çubukta **Dersi Başlat**. Ekran izleme yalnızca ders açıkken çalışır —
-bu bilinçli bir güvenlik kısıtıdır.
+> Öğrenci ekranının paylaşıldığını **her zaman görür**: tepsi simgesi değişir
+> ve "EKRANINIZ PAYLAŞILIYOR" göstergesi çıkar. Bu gösterge kapatılamaz ve
+> hiçbir ayarla bastırılamaz.
 
-### 2. Bilgisayarları bul
+### 1. Bilgisayarları bul
 
-**Bilgisayarları Ara** ekranında arama kutusuna laboratuvar ön ekini yazın:
+**Bilgisayarları Ara** ekranında arama kutusuna bilgisayar adı ön ekini, oda
+adını veya IP adresini yazın:
 
 | Yazdığınız | Bulunanlar |
 |---|---|
 | `LAB1` | LAB101, LAB102 … LAB120 |
-| `LAB2` | LAB201, LAB202 … LAB220 |
 | `LAB105` | Yalnızca LAB105 |
-| `LAB` | Yetkili tüm LAB bilgisayarları |
+| `Lab 1` | Oda adı "Lab 1" olan bütün bilgisayarlar |
+| `192.168.1.` | O adres aralığındaki cihazlar |
 | (boş) | Tüm cihazlar |
 
 Büyük/küçük harf fark etmez.
 
-### 3. Ekranları aç
+#### Gruplar ve oda adı
+
+Cihazlar iki ölçütle gruplanır ve **oda adı önce gelir**:
+
+1. **Oda adı** — öğrencinin ilk kurulumda girdiği laboratuvar adı. Grup adıyla
+   aynıysa cihaz o gruba düşer.
+2. **Bilgisayar adı ön eki** — odası bilinmeyen cihazlar için. `LAB1` ön eki
+   `LAB101`, `LAB102` … cihazlarını kapsar.
+
+Odası bilinen bir cihaz yalnızca o odanın grubunda görünür; öneki başka bir
+grupla eşleşse bile oraya düşmez.
+
+Oda adı `DESKTOP-4F9K2A` gibi varsayılan adlara sahip laboratuvarlarda tek
+çalışan yöntemdir. Listedeki **Oda** sütunu boşsa (—) o bilgisayarda oda adı
+girilmemiştir; öğrenci tarafındaki yapılandırma penceresinden girilebilir.
+
+**Grup Ekle** penceresi hem bildirilen odaları hem ağdaki adlardan çıkarılan
+ön ekleri önerir. Yalnızca odaya göre eşleşen bir grup için ön ek alanını boş
+bırakın.
+
+### 2. Ekranları aç
 
 **Ekranları Göster**'e basın. Seçili cihaz yoksa işlem bağlı tüm cihazlara
 uygulanır.
@@ -55,10 +79,37 @@ Kart üzerindeki renkli nokta:
 Görüntü yerine açıklama görüyorsanız sebep orada yazar. **Sahte ekran
 görüntüsü hiçbir zaman gösterilmez.**
 
-### 4. Bir ekranı büyüt
+### 3. Bir ekranı büyüt
 
 Kartına **çift tıklayın**. O cihaz yüksek kaliteye (12 FPS, 1600×900),
 diğerleri önizlemeye geçer. Pencereyi kapatınca hepsi önizlemeye döner.
+
+### 4. Dosya gönder ve dosya al
+
+Şeritteki **Sınıf → Dosyalar** grubunda üç komut var.
+
+**Dosya Gönder** — dosyayı seçtikten sonra **öğrencinin dosya gezgini
+açılır** ve hedef klasörü oradan seçersiniz. Gezinti Masaüstü, Belgeler ve
+İndirilenler ile sınırlıdır; sistem klasörlerine erişilemez.
+
+Birden çok cihaza gönderirken seçim ilk bilgisayarın gezgininde yapılır ama
+taşınan değer **köke göre görelidir**: `Belgeler\Ödevler` seçerseniz dosya
+her öğrencinin kendi `Belgeler\Ödevler` klasörüne iner. Kökün kendisini
+seçerseniz altındaki `OpenClass` klasörü kullanılır.
+
+Aynı adlı dosya varsa üzerine yazılmaz, yeni bir ad verilir (`ders.pdf` →
+`ders (2).pdf`). Öğrenciye her gönderim, dosyanın hangi klasöre indiğiyle
+birlikte bildirilir.
+
+**Dosya Al** — tek bir cihaz seçiliyken etkindir. Öğrencinin Masaüstü,
+Belgeler, İndirilenler ve OpenClass klasörlerinde gezip dosya indirebilirsiniz.
+**Yalnızca listeleme ve indirme**: yazma, silme ve yeniden adlandırma yoktur.
+İndirilenler `Belgeler\OpenClass\Toplanan\<bilgisayar adı>` altına düşer;
+**Klasörü Değiştir** ile başka bir yere toplayabilirsiniz (seçim o oturum
+boyunca korunur). Öğrencide "dosyalarınıza bakılıyor" göstergesi durur ve her
+indirme denetim kaydına yazılır.
+
+**Gönderimler** — yürüyen ve bitmiş aktarımların durumu.
 
 ### 5. Mesaj gönder
 
@@ -70,10 +121,6 @@ yoksa mesaj bağlı tüm cihazlara gider.
 Öğrenci, tepsi simgesine sağ tıklayıp **Yardım İste**'yi seçtiğinde kartında
 turuncu rozet belirir ve sol raydaki sayaç artar. **Yardım** ekranından
 **Görüldü** ile kapatın.
-
-### 7. Dersi bitir
-
-**Dersi Bitir**. Tüm ekran yayınları durur ve öğrencilerin göstergesi kapanır.
 
 ## Cihaz yönetimi
 

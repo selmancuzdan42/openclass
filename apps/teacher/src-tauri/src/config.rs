@@ -36,8 +36,22 @@ pub struct TeacherConfig {
     /// (IP veya alan adı).
     pub extra_discovery_hosts: Vec<String>,
     /// Kurulum sihirbazı tamamlandı mı?
+    ///
+    /// `false` iken konsol açılışta hangi laboratuvarın yönetileceğini sorar.
     pub setup_completed: bool,
+    /// Konsolun yönettiği laboratuvar/oda adı.
+    ///
+    /// `None` ise bütün cihazlar listelenir. Öğrencinin bildirdiği oda adıyla
+    /// karşılaştırılır; odası bilinmeyen cihazlar filtre uygulanınca listede
+    /// görünmez.
     /// Öğretmenin tanımladığı laboratuvar grupları.
+    pub active_room: Option<String>,
+    /// Konsolun süzdüğü bilgisayar adı ön eki (`LAB1`).
+    ///
+    /// Oda adı bilinmeyen laboratuvarlar için ikinci yol. Oda ve ön ek
+    /// birlikte verilirse **oda önceliklidir**; ön ek yalnızca odası
+    /// bilinmeyen cihazlara uygulanır.
+    pub active_prefix: Option<String>,
     pub groups: Vec<DeviceGroup>,
 }
 
@@ -50,6 +64,8 @@ impl Default for TeacherConfig {
             control_port: DEFAULT_CONTROL_PORT,
             extra_discovery_hosts: Vec::new(),
             setup_completed: false,
+            active_room: None,
+            active_prefix: None,
             groups: Vec::new(),
         }
     }

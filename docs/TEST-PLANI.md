@@ -36,7 +36,7 @@ de `LAB201` olarak ayarlanıp LAB1 aramasından dışlandığı doğrulanmalı.
 | 7 | 20 eşzamanlı akış (Ortam B) | CPU/RAM/ağ kabul edilebilir | ⬜ |
 | 8 | Ağ kablosu çekilir / VM duraklatılır | İki uygulama da kilitlenmez, yeniden bağlanır | ⬜ |
 | 9 | Yetkisiz cihaz bağlanmaya çalışır | Reddedilir, denetim kaydına `auth_failed` düşer | ⬜ |
-| 10 | Ders bitirilir | Tüm yayınlar durur, öğrenci göstergesi kapanır | ⬜ |
+| 10 | Öğretmen konsolu kapatılır | Tüm yayınlar durur, öğrenci göstergesi kapanır | ⬜ |
 | 11 | Mesaj + yardım talebi | Doğru cihazlara ulaşır | ⬜ |
 | 12 | Teacher kapatılır | Öğrenci ajanı güvenli duruma geçer, çökmez | ⬜ |
 
@@ -48,7 +48,7 @@ de `LAB201` olarak ayarlanıp LAB1 aramasından dışlandığı doğrulanmalı.
 | S2 | Kod üretildikten 6 dakika sonra kullanılır | Reddedilir | ⬜ |
 | S3 | Öğretmen cihaz yetkisini kaldırır | Bağlantı kopar; öğrenci "eşleştirilmedi" durumuna döner ve yeni kodla yeniden eşleşebilir | ⬜ |
 | S4 | Öğretmen konsolu silinip yeniden kurulur (yeni sertifika) | Öğrenci bağlantıyı reddeder, yeniden eşleştirme ister | ⬜ |
-| S5 | Ders kapalıyken ekran yayını istenir | Reddedilir | ⬜ |
+| S5 | Konsol kapalıyken ajan tek başına çalışır | Hiçbir yayın başlamaz, gösterge kapalı kalır | ⬜ |
 | S6 | UAC yükseltme istemi açılır | Kare akışı durur, çökme olmaz, görüntü donmuş gösterilmez | ⬜ |
 
 ### Uzaktan kontrol, kilit ve dosya (doğrulanmadı)
@@ -76,7 +76,7 @@ Bu özelliklerin kodu tamamlandı ama **hiçbiri gerçek donanımda
 | D2 | Aynı dosya tekrar gönderilir | Üzerine yazmaz, `(2)` ekiyle kaydedilir | ⬜ |
 | D3 | Gönderimler penceresi | Her alıcının durumu ayrı satırda, özet doğrulandı yazar | ⬜ |
 | D4 | Disk doluyken gönderilir | Öğrenci reddeder, sebebi konsolda görünür | ⬜ |
-| G1 | Sağ tık → Dosyalarını görüntüle | Kök listesi gelir; öğrencide gösterge belirir | ⬜ |
+| G1 | Sağ tık → Dosyalarını al | Kök listesi gelir; öğrencide gösterge belirir | ⬜ |
 | G2 | Klasörlerde gezilir | İçerik listelenir, üst klasöre çıkılır | ⬜ |
 | G3 | Bir dosya indirilir | `Belgeler\OpenClass\Toplanan\<ad>` altına düşer, özet doğrulanır | ⬜ |
 | G4 | Öğrenciye indirme bildirimi | Her indirmede bildirim çıkar | ⬜ |
@@ -115,3 +115,104 @@ Bu özelliklerin kodu tamamlandı ama **hiçbiri gerçek donanımda
 - Ders başlatmadan ilk karenin gelmesine kadar geçen süre
 
 Ölçümler bu dosyadaki ilgili senaryonun altına not edilir.
+
+## 0.2.0 — oda desteği, sihirbaz ve dosya hedefleri
+
+### Şema geçişi (en riskli parça)
+
+Birim testleri sentetik veritabanında bunu doğruluyor; aşağıdakiler gerçek
+kurulumda elle sınanır. **Her biri öncesinde `openclass.db` yedeklenmeli.**
+
+| # | Adım | Beklenen | Durum |
+|---|---|---|---|
+| Y1 | 0.1.0'da eşleşmiş bir konsol 0.2.0'a yükseltilir | Cihazlar listede kalır, **yeniden eşleştirme istenmez** | ⬜ |
+| Y2 | Yükseltme sonrası Oda sütunu | Eski cihazlarda "—" görünür | ⬜ |
+| Y3 | Konsol kapatılıp yeniden açılır | Hata yok, kayıtlar yerinde | ⬜ |
+| Y4 | 0.1.0 ajanı 0.2.0 konsoluna bağlanır | Bağlanır; oda boş kalır | ⬜ |
+| Y5 | 0.2.0 ajanı 0.1.0 konsoluna bağlanır | Bağlanır; oda yok sayılır | ⬜ |
+
+### İlk açılış sihirbazı
+
+| # | Adım | Beklenen | Durum |
+|---|---|---|---|
+| S7 | Temiz kurulumda ajan ilk açılır | Sihirbaz açılır, 1. adım oda adı ister | ⬜ |
+| S8 | Oda adı girilip kaydedilir | 2. adıma geçer, eşleştirme kartı gelir | ⬜ |
+| S9 | Sihirbaz 1. adımda kapatılır, ajan yeniden açılır | Sihirbaz yine 1. adımdan açılır | ⬜ |
+| S10 | Sihirbaz 2. adımda kapatılır, ajan yeniden açılır | Oda korunmuş, doğrudan 2. adım | ⬜ |
+| S11 | "Şimdilik atla" ile geçilir | Eşleştirmeye geçer; öğretmende oda "—" | ⬜ |
+| S12 | Eşleşmiş cihazda ajan açılır | Sihirbaz **açılmaz**, olağan pencere gelir | ⬜ |
+| S13 | Oda adı yapılandırmadan değiştirilir | Bir sonraki bağlantıda öğretmende güncellenir | ⬜ |
+| S14 | 64 karakterden uzun oda adı | Kırpılır, hata vermez | ⬜ |
+
+### Oda ve gruplama
+
+| # | Adım | Beklenen | Durum |
+|---|---|---|---|
+| O1 | Aynı odayı bildiren iki bilgisayar | İkisi de o odanın grubunda | ⬜ |
+| O2 | Oda adı grup adıyla eşleşir, öneki eşleşmez | Yine odanın grubunda görünür | ⬜ |
+| O3 | Öneki `LAB1`, odası `Lab 2` olan bilgisayar | **Yalnızca** Lab 2 grubunda; LAB1'de yok | ⬜ |
+| O4 | Ön eki boş, yalnızca odalı grup | Odası bilinmeyen cihazlar bu gruba düşmez | ⬜ |
+| O5 | Arama kutusuna oda adı yazılır | O odadaki cihazlar listelenir | ⬜ |
+| O6 | Grup Ekle penceresi açılır | Hem oda hem ön ek önerileri görünür | ⬜ |
+
+### Dosya hedefleri
+
+| # | Adım | Beklenen | Durum |
+|---|---|---|---|
+| D7 | Dosya seçilir → gezgin açılır, Masaüstü'ne inilir | `Masaüstü\OpenClass` altına iner | ⬜ |
+| D8 | Gezginde `Belgeler\Ödevler` klasörüne girilip gönderilir | Her öğrencinin kendi `Belgeler\Ödevler` klasörüne iner | ⬜ |
+| D9 | Kökün kendisi seçilip gönderilir | Kökün altındaki `OpenClass` kullanılır | ⬜ |
+| D10 | Öğrenci bildirimi | Hangi klasöre indiğini yazar | ⬜ |
+| D11 | Hedef klasörde aynı adlı dosya varsa | Üzerine yazmaz, yeni ad verir | ⬜ |
+| D12 | Dosya Al → Klasörü Değiştir | Seçilen klasöre iner, alt klasör bilgisayar adı | ⬜ |
+| D13 | Salt okunur klasör seçilir | Seçim anında hata verir, indirme başlamaz | ⬜ |
+| D14 | Seçilen klasör silinir, sonra indirilir | Varsayılana döner, aktarım yarıda patlamaz | ⬜ |
+| D15 | İki öğrenciden aynı adlı dosya alınır | Ayrı bilgisayar adı klasörlerinde, ezilmez | ⬜ |
+
+### Şerit düzeni
+
+| # | Adım | Beklenen | Durum |
+|---|---|---|---|
+| R1 | Sınıf sekmesi | Dosyalar grubunda Gönder · Al · Gönderimler yan yana | ⬜ |
+| R2 | Yönetim sekmesi | Dosyalar grubu artık yok | ⬜ |
+| R3 | Hiç cihaz seçili değilken Dosya Al | Devre dışı, ipucu "Tek bir cihaz seçin" | ⬜ |
+| R4 | İki cihaz seçiliyken Dosya Al | Devre dışı | ⬜ |
+| R5 | Klavyeyle sekmeler arasında gezinme | Odak halkası görünür | ⬜ |
+
+### Ders oturumunun kaldırılması
+
+Oturum kavramı 0.2.0'da kaldırıldı. Paylaşımın gizlenmemesini sağlayan tek
+koruma artık öğrencideki **görünür göstergedir**; bu yüzden göstergenin her
+koşulda çalıştığı doğrulanmalı.
+
+| # | Adım | Beklenen | Durum |
+|---|---|---|---|
+| T1 | Konsol açılır, öğrenci ajanı bağlanır | Önizleme kendiliğinden gelir, "Dersi Başlat" aranmaz | ⬜ |
+| T2 | Bağlantı anında öğrenci ekranı | Tepsi simgesi değişir, "EKRANINIZ PAYLAŞILIYOR" çıkar | ⬜ |
+| T3 | Konsol kapatılır | Gösterge **anında** kalkar, yayın durur | ⬜ |
+| T4 | Ağ kablosu çekilir | Gösterge kalkar, kilit ve uzaktan kontrol düşer | ⬜ |
+| T5 | Kilit açıkken konsol kapatılır | Kilit kalkar (en geç bağlantı kopunca) | ⬜ |
+| T6 | Uzaktan kontrol açıkken konsol kapatılır | Kontrol düşer, şerit kalkar | ⬜ |
+
+### Laboratuvar seçimi (öğretmen açılışı)
+
+| # | Adım | Beklenen | Durum |
+|---|---|---|---|
+| L1 | Konsol ilk kez açılır | Laboratuvar seçme penceresi çıkar | ⬜ |
+| L2 | Hiç oda bildiren cihaz yokken | "Henüz oda adı bildiren bilgisayar yok" + Tümünü göster | ⬜ |
+| L3 | Bir laboratuvar seçilir | Liste o odaya süzülür, pencere bir daha çıkmaz | ⬜ |
+| L4 | "Tümünü göster" seçilir | Bütün cihazlar listelenir, pencere bir daha çıkmaz | ⬜ |
+| L5 | Ayarlar → Yönetilen laboratuvar değiştirilir | Liste yeni odaya süzülür | ⬜ |
+| L6 | Laboratuvar seçiliyken odası bilinmeyen cihaz | Listede görünmez | ⬜ |
+
+### Gönderme hedefinin güvenliği
+
+Bu senaryolar değiştirilmiş bir konsola karşı öğrenci tarafının savunmasını
+sınar; normal arayüzden üretilemezler, elle mesaj göndermek gerekir.
+
+| # | Adım | Beklenen | Durum |
+|---|---|---|---|
+| GS1 | `subpath` olarak `../../Windows` gönderilir | Reddedilir, dosya yazılmaz | ⬜ |
+| GS2 | `subpath` olarak `C:\Windows` gönderilir | Reddedilir | ⬜ |
+| GS3 | 9 seviye derin `subpath` | Reddedilir | ⬜ |
+| GS4 | Sembolik bağ kök dışına işaret ediyorsa | Son kontrol yakalar, yazılmaz | ⬜ |

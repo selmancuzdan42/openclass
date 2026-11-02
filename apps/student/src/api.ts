@@ -25,6 +25,8 @@ export const api = {
     call<void>("pair_with_teacher", args),
   unpair: () => call<void>("unpair"),
   setManualAddress: (address: string | null) => call<void>("set_manual_address", { address }),
+  /** Laboratuvar/oda adını kaydeder. Boş metin alanı temizler. */
+  setRoom: (room: string) => call<void>("set_room", { room }),
   reconnectNow: () => call<void>("reconnect_now"),
   requestHelp: (note?: string) => call<void>("request_help", { note }),
   cancelHelp: () => call<void>("cancel_help"),
