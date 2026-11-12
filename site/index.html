@@ -290,5 +290,69 @@ footer .ml { margin-left: auto; }
   </div>
 </footer>
 
+<script>
+(function () {
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce || !("IntersectionObserver" in window)) return;
+
+  // Kart/bölüm öğelerine kaydırma animasyonu sınıfı ekle.
+  var groups = [
+    { sel: ".block .kicker", stagger: 0 },
+    { sel: ".block h2", stagger: 0 },
+    { sel: ".block .sub", stagger: 1 },
+    { sel: ".feature, .step, .gallery figure", stagger: 2 }
+  ];
+  var items = [];
+  groups.forEach(function (g) {
+    document.querySelectorAll(g.sel).forEach(function (el) {
+      el.classList.add("reveal");
+      el.classList.add("style-" + Math.min(g.stagger, 3));
+      items.push(el);
+    });
+  });
+  // Aynı gruptaki kartları zincir gibi sırayla getir: her bir sonrakine
+  // küçük artan gecikme. (`.style-N` yalnızca grubun giriş tabanıdır.)
+  document.querySelectorAll(".feature, .step, .gallery figure").forEach(function (el, i) {
+    // 0,1,2,0,1,2… diye döner, 60ms'lik fark verir.
+    el.style.transitionDelay = ((i % 3) * 70) + "ms";
+  });
+
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (en.isIntersecting) {
+        en.target.classList.add("in");
+        io.unobserve(en.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+  items.forEach(function (el) { io.observe(el); });
+
+  // IO'nun yanına scroll tabanlı bir yedek: bazı ortamlarda (örn. başlıksız
+  // tarayıcılar) IO tetiklenmez; scroll olayıyla manuel olarak görünüme
+  // girenleri de `in` yap. İkisi birlikte animasyonu garanti eder.
+  function revealOnScroll() {
+    var vh = window.innerHeight;
+    items.forEach(function (el) {
+      if (!el.classList.contains("in")) {
+        var r = el.getBoundingClientRect();
+        if (r.top < vh * 0.92 && r.bottom > 0) el.classList.add("in");
+      }
+    });
+  }
+  var ticking = false;
+  function onScroll() {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(function () {
+      revealOnScroll();
+      ticking = false;
+    });
+  }
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", onScroll);
+  revealOnScroll(); // ilk ekrandaki öğeleri anında getir
+})();
+</script>
+
 </body>
 </html>
