@@ -898,7 +898,7 @@ mod arayuz_bicimi_testleri {
             protocol: crate::PROTOCOL_VERSION,
             device_id: Uuid::nil(),
             hostname: "LAB101".into(),
-            app_version: "0.2.0".into(),
+            app_version: "0.3.0".into(),
             public_key: vec![3u8; 32],
             room: Some("Lab 1".into()),
         };
