@@ -1318,11 +1318,34 @@ fn unix_now() -> i64 {
 
 /// Bilgisayarı kapatır (yalnızca Windows).
 ///
-/// Zorla + kapat (power off) bayrakları kullanılır. Yönetici yetkisi gerekir;
-/// ajan çalışma anında yükseltme yöntemiyle yönetici olarak çalıştığı için
-/// bu hak genelde mevcut olur. Yetki yoksa çağrı sessizce başarısız kalır.
+/// İlk olarak Windows'un yerli `shutdown.exe` komutu kullanılır; bu, yönetici
+/// oturumunda her zaman çalışan en güvenilir yoldur. Komut yoksa (`shutdown`
+/// bulunamazsa) veya başarısız olursa `ExitWindowsEx` API'si yedek olarak
+/// denenir. Her ikisi de yetki veya oturum engeliyle sessizce başarısız
+/// kalabilir; sonuç loglanır.
 #[cfg(windows)]
 fn shutdown_computer_windows() {
+    use std::process::Command;
+
+    // 1) Yerli kapatma komutu: `/s` kapat, `/f` uygulamaları zorla kapat,
+    //    `/t 0` gecikmesiz. Bu çağrı admin oturumunda /s /f ile çalışır.
+    let cmd = Command::new("shutdown")
+        .args(["/s", "/f", "/t", "0"])
+        .status();
+    match cmd {
+        Ok(st) if st.success() => {
+            tracing::info!("shutdown.exe ile kapatma başlatıldı");
+            return;
+        }
+        Ok(st) => {
+            tracing::warn!(kod = ?st.code(), "shutdown.exe başarısız, API deneniyor");
+        }
+        Err(err) => {
+            tracing::warn!(%err, "shutdown.exe çalıştırılamadı, API deneniyor");
+        }
+    }
+
+    // 2) Yedek: doğrudan Windows API.
     use windows_sys::Win32::System::Shutdown::{
         EWX_FORCE, EWX_POWEROFF, EWX_SHUTDOWN, ExitWindowsEx,
     };
@@ -1332,6 +1355,7 @@ fn shutdown_computer_windows() {
         tracing::error!("bilgisayar kapatılamadı (yetki veya oturum engeli)");
     }
 }
+
 
 /// Anahtar kare aralığı.
 ///

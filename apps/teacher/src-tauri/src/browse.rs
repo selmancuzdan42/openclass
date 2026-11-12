@@ -237,6 +237,16 @@ pub struct BrowseSession {
     pub download: Option<Download>,
     /// Arayüze gösterilen son indirme sonucu.
     pub download_view: Option<DownloadView>,
+    /// Öğretmenin bu indirme için seçtiği hedef klasör.
+    ///
+    /// `browse_fetch` çağrılırken öğretmen "kaydedilecek yeri seç" diyerek
+    /// kendi makinesinde bir klasör seçer; o yol burada saklanır ve indirme
+    /// `download_root` yerine oraya yazılır. Kullanıcı iptal ederse boştur
+    /// ve varsayılan klasör kullanılır.
+    ///
+    /// Öğrenci `BrowseFileStart` gönderene kadar beklenirken bu değerin
+    /// ayakta kalması gerektiği için oturumda tutulur.
+    pub target_dir: Option<PathBuf>,
 }
 
 impl BrowseSession {
@@ -251,6 +261,7 @@ impl BrowseSession {
             error: None,
             download: None,
             download_view: None,
+            target_dir: None,
         }
     }
 }

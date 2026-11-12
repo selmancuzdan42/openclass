@@ -96,12 +96,34 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   get_broadcast: () => null,
   start_broadcast: () => ({ broadcastId: "x", startedAt: 0 }),
   stop_broadcast: () => null,
-  open_browser: () => null,
-  close_browser: () => null,
-  browse_list: () => null,
-  browse_fetch: () => null,
-  get_browse: () => null,
+  open_browser: () => {
+    browseOpen = true;
+    browsePath = "";
+    dispatch("browse-changed", mockBrowseView());
+    return null;
+  },
+  close_browser: () => {
+    browseOpen = false;
+    browsePath = "";
+    dispatch("browse-changed", null);
+    return null;
+  },
+  browse_list: (args) => {
+    const path = (args.path as string) ?? "";
+    browsePath = path;
+    // Geçersiz bir yol seçmeceği varsayılıp köke düşülür.
+    if (path !== "" && !(path in MOCK_TREE)) browsePath = "";
+    dispatch("browse-changed", mockBrowseView());
+    return null;
+  },
+  browse_fetch: () => {
+    // Gerçek indirme yapılmaz; sadece durum bozulmasın diye döner.
+    return null;
+  },
+  get_browse: () => mockBrowseView(),
   open_downloads_dir: () => null,
+  // Klasör seçimi için kısayol: native diyalog iptal edilmiş gibi davranır.
+  "plugin:dialog|open": () => null,
   send_file: () => "00000000-0000-0000-0000-000000000000",
   collect_files: () => 1,
   shutdown_device: () => null,
@@ -171,6 +193,57 @@ function dispatch(event: string, payload: unknown) {
   for (const h of handlers) {
     h({ event, id: 0, payload });
   }
+}
+
+// ------------------------------------------------- uzak dosya gezgini (mock)
+// Sahte arka uçta gerçek bir öğrenci yok; gezginin davranışı evrensel ve
+// küçük bir ağaçla simüle edilir ki arayüz Tauri olmadan da gezilebilsin.
+
+let browseOpen = false;
+let browsePath = "";
+let browseRoots = [
+  { label: "Masaüstü", path: "/ogr/Masaüstü" },
+  { label: "Belgeler", path: "/ogr/Belgeler" },
+  { label: "İndirilenler", path: "/ogr/İndirilenler" },
+];
+const MOCK_TREE: Record<string, unknown[]> = {
+  "/ogr/Masaüstü": [
+    { name: "Ödevler", isDir: true, size: 0, modified: 0 },
+    { name: "sınav.docx", isDir: false, size: 48_000, modified: 0 },
+    { name: "sunum.pptx", isDir: false, size: 1_200_000, modified: 0 },
+  ],
+  "/ogr/Belgeler": [
+    { name: "proje", isDir: true, size: 0, modified: 0 },
+    { name: "notlar.txt", isDir: false, size: 2_400, modified: 0 },
+    { name: "özet.pdf", isDir: false, size: 360_000, modified: 0 },
+  ],
+  "/ogr/İndirilenler": [
+    { name: "setup.exe", isDir: false, size: 54_000_000, modified: 0 },
+  ],
+  "/ogr/Belgeler/proje": [
+    { name: "rapor.pdf", isDir: false, size: 240_000, modified: 0 },
+  ],
+};
+
+function mockBrowseView() {
+  if (!browseOpen) return null;
+  const path = browsePath;
+  return {
+    deviceId: "00000000-0000-4000-8000-000000000000",
+    hostname: "LAB101",
+    path,
+    roots: path === "" ? browseRoots : [],
+    entries:
+      path === ""
+        ? []
+        : (MOCK_TREE[browsePath] ?? []).map((e) => ({
+            ...(e as { name: string }),
+            modified: Math.floor(Date.now() / 1000) - 3600,
+          })),
+    loading: false,
+    error: null,
+    download: null,
+  };
 }
 
 // --------------------------------------------- key-event simülasyonu

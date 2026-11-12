@@ -90,7 +90,8 @@ export const api = {
   openBrowser: (deviceId: string) => call<void>("open_browser", { deviceId }),
   closeBrowser: () => call<void>("close_browser"),
   browseList: (path: string) => call<void>("browse_list", { path }),
-  browseFetch: (path: string) => call<void>("browse_fetch", { path }),
+  browseFetch: (path: string, targetDir: string | null) =>
+    call<void>("browse_fetch", { path, targetDir }),
   getBrowse: () => call<BrowseView | null>("get_browse"),
   openDownloadsDir: () => call<void>("open_downloads_dir"),
   getDownloadRoot: () => call<string>("get_download_root"),

@@ -958,16 +958,20 @@ async fn handle_client_message(
             size,
             sha256,
         } => {
-            let hostname = {
+            // Kök kilidi `await` üzerinden taşınmasın diye oturumdan kopyalanır.
+            let (hostname, target_dir) = {
                 let guard = state.browse.read();
                 match guard.as_ref() {
-                    Some(s) if s.device_id == device_id => s.hostname.clone(),
+                    Some(s) if s.device_id == device_id => {
+                        (s.hostname.clone(), s.target_dir.clone())
+                    }
                     _ => return,
                 }
             };
 
-            // Kök kilidi `await` üzerinden taşınmasın diye kopyalanır.
-            let kok = state.download_root.read().clone();
+            // Öğretmen indirme için ayrı bir hedef klasör seçtiyse oraya,
+            // seçmediyse genel indirme köküne yazılır.
+            let kok = target_dir.or_else(|| state.download_root.read().clone());
             match crate::browse::Download::open(
                 request_id,
                 &hostname,

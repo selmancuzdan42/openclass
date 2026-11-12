@@ -51,6 +51,7 @@ import {
   SettingsDialog,
   ShutdownDialog,
 } from "./dialogs";
+import { BrowseDialog } from "./BrowseDialog";
 import { open as openFileDialog, open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { TransfersDialog } from "./TransfersDialog";
 import { GroupBar, type GroupTab } from "./GroupBar";
@@ -121,6 +122,9 @@ function Console() {
   const [collectOpen, setCollectOpen] = useState(false);
   const [shutdownTarget, setShutdownTarget] = useState<DeviceView | null>(null);
   const [transfersOpen, setTransfersOpen] = useState(false);
+  // Uzak dosya gezgini: "Dosya Al" yalnızca tek seçili öğrenciyle açılır.
+  const [browseOpen, setBrowseOpen] = useState(false);
+  const [browseDevice, setBrowseDevice] = useState<DeviceView | null>(null);
 
   // Seçim ve filtre
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
@@ -547,12 +551,17 @@ function Console() {
               {
                 label: "Dosya Al",
                 icon: <FileDown size={18} />,
-                disabled: actionTargets.length === 0,
+                disabled: selectedDevices.length !== 1 || selectedDevices[0]?.online !== true,
                 title:
-                  actionTargets.length === 0
-                    ? "Öğrenci seçin"
-                    : "Seçili öğrencilerin bilgisayarından dosya toplar",
-                onClick: () => setCollectOpen(true),
+                  selectedDevices.length !== 1
+                    ? "Tek bir öğrenci seçin"
+                    : "Seçili öğrencinin dosyalarını gezip indirir",
+                onClick: () => {
+                  const d = selectedDevices[0];
+                  if (!d || !d.online) return;
+                  setBrowseDevice(d);
+                  setBrowseOpen(true);
+                },
               },
               {
                 label: "Gönderimler",
@@ -1150,6 +1159,11 @@ function Console() {
         targets={actionTargets}
         onClose={() => setCollectOpen(false)}
         onCollected={refreshDevices}
+      />
+      <BrowseDialog
+        open={browseOpen}
+        device={browseDevice}
+        onClose={() => setBrowseOpen(false)}
       />
       <GroupDialog
         open={groupOpen}

@@ -1303,18 +1303,42 @@ pub async fn browse_list(state: State<'_, Arc<AppState>>, path: String) -> CmdRe
 
 /// Bir dosyayı öğretmenin makinesine indirir.
 ///
-/// Dosya `Belgeler\OpenClass\Toplanan\<bilgisayar adı>` altına yazılır ve
+/// Dosya, `browse_fetch` çağrılırken öğretmenin seçtiği hedef klasöre yazılır
+/// (`Belgeler\OpenClass\Toplanan\<bilgisayar adı>` varsayılanı altına);
 /// SHA-256 özetiyle doğrulanır. Öğrenciye indirme ayrıca bildirilir.
+///
+/// `target_dir`: öğretmenin indirmenin gideceği yeri seçmesidir. Geçerli bir
+/// klasör değilse açıkça hata verir — yanlış yol indirmenin ortasında değil,
+/// seçim anında öğrenilmeli. `None`/boş ise varsayılan indirme klasörü kullanılır.
 #[tauri::command]
-pub async fn browse_fetch(state: State<'_, Arc<AppState>>, path: String) -> CmdResult<()> {
+pub async fn browse_fetch(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    target_dir: Option<String>,
+) -> CmdResult<()> {
+    // Seçilen hedef öğretmenin kendi makinesindedir; var olduğu ve klasör
+    // olduğu seçim anında doğrulanır. Geçersizse varsayılana değil hataya
+    // düşülür: indirme yanlış yere değil, hiç başlamamalı.
+    let target = match target_dir.as_deref().map(str::trim) {
+        Some(p) if !p.is_empty() => {
+            let yol = std::path::PathBuf::from(p);
+            if !yol.is_dir() {
+                return Err(format!("Hedef klasör bulunamadı: {}", yol.display()));
+            }
+            Some(yol)
+        }
+        _ => None,
+    };
+
     let device_id = {
-        let guard = state.browse.read();
-        let Some(session) = guard.as_ref() else {
+        let mut guard = state.browse.write();
+        let Some(session) = guard.as_mut() else {
             return Err("Dosya gezgini açık değil.".into());
         };
         if session.download.is_some() {
             return Err("Başka bir indirme sürüyor.".into());
         }
+        session.target_dir = target;
         session.device_id
     };
 
