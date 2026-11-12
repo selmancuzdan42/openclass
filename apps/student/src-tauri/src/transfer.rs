@@ -63,7 +63,10 @@ pub fn inbox_dir(destination: FileDestination, subpath: Option<&str>) -> Result<
     });
 
     // Seçilen kök yoksa Belgeler'e düş.
-    let kok = kok.or_else(|| dirs.as_ref().and_then(|u| u.document_dir().map(Path::to_path_buf)));
+    let kok = kok.or_else(|| {
+        dirs.as_ref()
+            .and_then(|u| u.document_dir().map(Path::to_path_buf))
+    });
 
     let Some(kok) = kok else {
         // Hiçbir kullanıcı klasörü okunamadı: uygulamanın veri dizinine düş.
@@ -442,7 +445,15 @@ mod tests {
     fn bos_ve_cok_buyuk_dosya_reddedilir() {
         let id = Uuid::new_v4();
         assert!(Incoming::open(id, "a.bin", 0, [0; 32], Default::default(), None).is_err());
-        assert!(Incoming::open(id, "a.bin", MAX_FILE_SIZE + 1, [0; 32], Default::default(), None).is_err());
+        assert!(Incoming::open(
+            id,
+            "a.bin",
+            MAX_FILE_SIZE + 1,
+            [0; 32],
+            Default::default(),
+            None
+        )
+        .is_err());
     }
 
     // ------------------------------------------- öğretmenin verdiği alt yol
@@ -481,10 +492,16 @@ mod tests {
 
     #[test]
     fn asiri_derin_alt_yol_reddedilir() {
-        let derin = (0..9).map(|i| format!("k{i}")).collect::<Vec<_>>().join("/");
+        let derin = (0..9)
+            .map(|i| format!("k{i}"))
+            .collect::<Vec<_>>()
+            .join("/");
         assert!(safe_subpath(&derin).is_err(), "9 seviye kabul edilmemeli");
 
-        let kabul = (0..8).map(|i| format!("k{i}")).collect::<Vec<_>>().join("/");
+        let kabul = (0..8)
+            .map(|i| format!("k{i}"))
+            .collect::<Vec<_>>()
+            .join("/");
         assert!(safe_subpath(&kabul).is_ok(), "8 seviye kabul edilmeli");
     }
 

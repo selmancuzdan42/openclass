@@ -283,6 +283,19 @@ pub enum ClientMessage {
         detail: Option<String>,
     },
 
+    /// Öğrenci klavyesinden yakalanan bir tuş vuruşu (klavye izleme).
+    ///
+    /// Yalnızca `ServerMessage::StartKeyMonitor` aktifken gönderilir; olay
+    /// akışı öğrenci kancasından gelir ve öğretmene doğru ilerler.
+    KeyEvent {
+        /// Windows sanal tuş kodu (`VK_*`), InputEvent::Key ile aynı düzen.
+        code: u16,
+        /// Basılma mı bırakma mı.
+        pressed: bool,
+        /// Olay zaman damgası (ms, uygulama başlangıcına göre).
+        ts: u64,
+    },
+
     /// Dosya teklifi kabul edildi; parçalar beklenebilir.
     FileAccepted {
         transfer_id: Uuid,
@@ -490,6 +503,16 @@ pub enum ServerMessage {
         /// `true` interneti keser, `false` geri açar.
         block: bool,
     },
+
+    /// Öğrencinin klavyesinden tuşlama izlemesini başlatır.
+    ///
+    /// Öğrenci bir klavye kancası kurar ve tuş vuruşlarını `KeyEvent`
+    /// olarak öğretmene akıtır. İzleme kullanıcıya görünür olmalı (öğrenci
+    /// tarafında bir göstergede durur); gizli keylogger değildir.
+    StartKeyMonitor,
+
+    /// Tuş izlemesini durdurur.
+    StopKeyMonitor,
 
     /// Dosya gönderme teklifi.
     ///

@@ -14,6 +14,7 @@ mod commands;
 mod config;
 mod identity;
 mod input;
+mod keymon;
 mod lock;
 mod net;
 mod netblock;

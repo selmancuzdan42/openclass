@@ -78,6 +78,17 @@ export interface HelpEvent {
   note: string | null;
 }
 
+/** Öğrenci klavyesinden yakalanan bir tuş olayı (klavye izleme). */
+export interface KeyEvent {
+  deviceId: string;
+  /** Windows sanal tuş kodu (VK_*). */
+  code: number;
+  /** Basılma mı bırakma mı. */
+  pressed: boolean;
+  /** Olay zaman damgası (ms). */
+  ts: number;
+}
+
 export type Quality = "preview" | "focused";
 
 /** Öğrenci makinesine iletilecek girdi olayı. */

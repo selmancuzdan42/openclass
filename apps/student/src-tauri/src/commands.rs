@@ -6,8 +6,8 @@ use openclass_protocol::DEFAULT_CONTROL_PORT;
 use tauri::State;
 
 use crate::state::{
-    parse_address, AppState, ConnectionStatus, DiscoveredTeacher, PairIntent,
-    ReceivedNotice, SharingState,
+    parse_address, AppState, ConnectionStatus, DiscoveredTeacher, PairIntent, ReceivedNotice,
+    SharingState,
 };
 
 pub type CmdResult<T> = Result<T, String>;

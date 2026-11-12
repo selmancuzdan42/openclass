@@ -23,6 +23,7 @@ import {
   Rows3,
   ScreenShare,
   ScreenShareOff,
+  KeyRound,
   Settings as SettingsIcon,
   ShieldCheck,
   ShieldOff,
@@ -56,6 +57,7 @@ import {
   ContextMenu,
   Empty,
   IconButton,
+  Modal,
   Panel,
   TextInput,
   ToastProvider,
@@ -70,6 +72,7 @@ import type {
   DeviceView,
   FrameEvent,
   HelpEvent,
+  KeyEvent,
   PairingInfo,
   ServerInfo,
 } from "./types";
@@ -128,6 +131,16 @@ function Console() {
   const [focused, setFocused] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ deviceId: string; x: number; y: number } | null>(null);
 
+  // Klavye izleme: seçili tek cihazın tuş basımlarını canlı gösterir.
+  const [keyMonitorOpen, setKeyMonitorOpen] = useState(false);
+  const [keyMonitorDevice, setKeyMonitorDevice] = useState<DeviceView | null>(null);
+  const [keyMonitoring, setKeyMonitoring] = useState(false);
+  const [keyEvents, setKeyEvents] = useState<KeyLogEntry[]>([]);
+  // Dinleyici kapanağı taze tutmak yerine hedef cihazı ref'te izleriz; olay
+  // dinleyicisi bir kez kurulur ve daima güncel hedefe bakar.
+  const monitorTargetRef = useRef<string | null>(null);
+  const keyEventSeqRef = useRef(0);
+
   const refreshDevices = useCallback(async () => {
     try {
       // Sunucu tarafı filtresi yerine tam liste alınır: grup sekmeleri ve
@@ -185,6 +198,15 @@ function Console() {
               : d,
           ),
         );
+      }),
+      // Klavye izleme: yalnızca o an izlenen cihazın basımları listeye girer.
+      listen<KeyEvent>("key-event", (e) => {
+        const { deviceId, code, pressed, ts } = e.payload;
+        if (monitorTargetRef.current !== deviceId || !pressed) return;
+        setKeyEvents((prev) => [
+          ...prev.slice(-199),
+          { id: keyEventSeqRef.current++, label: keyLabel(code), code, ts },
+        ]);
       }),
     ];
     return () => {
@@ -388,6 +410,44 @@ function Console() {
     );
   }
 
+  async function openKeyMonitor() {
+    const device = selectedDevices[0];
+    if (!device) return;
+    setKeyMonitorDevice(device);
+    setKeyEvents([]);
+    setKeyMonitoring(false);
+    monitorTargetRef.current = device.deviceId;
+    setKeyMonitorOpen(true);
+  }
+
+  async function toggleKeyMonitor() {
+    if (!keyMonitorDevice) return;
+    if (keyMonitoring) {
+      await guard(
+        api.stopKeyMonitor(keyMonitorDevice.deviceId),
+        "Klavye izleme durduruldu.",
+      );
+      setKeyMonitoring(false);
+    } else {
+      setKeyEvents([]);
+      await guard(api.startKeyMonitor(keyMonitorDevice.deviceId));
+      setKeyMonitoring(true);
+    }
+  }
+
+  async function closeKeyMonitor() {
+    // İzleme açık kalmasın: pencere kapanınca öğrenci tarafındaki kanca da
+    // durur (bağlantı koparsa kod yine biter, ama temiz kapatmak daha iyi).
+    if (keyMonitoring && keyMonitorDevice) {
+      await api.stopKeyMonitor(keyMonitorDevice.deviceId).catch(() => {});
+    }
+    setKeyMonitoring(false);
+    monitorTargetRef.current = null;
+    setKeyMonitorOpen(false);
+    setKeyMonitorDevice(null);
+    setKeyEvents([]);
+  }
+
   // ----------------------------------------------------------------- şerit
 
   const ribbonTabs: RibbonTab[] = useMemo(
@@ -531,6 +591,21 @@ function Console() {
                 disabled: selectedDevices.length !== 1,
                 title: "Tek bir cihaz seçin",
                 onClick: () => selectedDevices[0] && void openFocus(selectedDevices[0].deviceId),
+              },
+            ],
+          },
+          {
+            caption: "Klavye izleme",
+            commands: [
+              {
+                label: "Klavye İzle",
+                icon: <KeyRound size={18} />,
+                disabled: selectedDevices.length !== 1,
+                title:
+                  selectedDevices.length === 1
+                    ? "Seçili öğrencinin tuş basımlarını canlı göster"
+                    : "Tek bir cihaz seçin",
+                onClick: () => void openKeyMonitor(),
               },
             ],
           },
@@ -1048,6 +1123,15 @@ function Console() {
         onClose={closeFocus}
       />
 
+      <KeyMonitorDialog
+        open={keyMonitorOpen}
+        device={keyMonitorDevice}
+        monitoring={keyMonitoring}
+        events={keyEvents}
+        onToggle={toggleKeyMonitor}
+        onClose={closeKeyMonitor}
+      />
+
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={contextItems} onClose={() => setMenu(null)} />
       )}
@@ -1328,4 +1412,136 @@ function destOf(s: string): "documents" | "desktop" | "downloads" | null {
 
 function destLabel(d: "documents" | "desktop" | "downloads"): string {
   return d === "documents" ? "Belgeler" : d === "desktop" ? "Masaüstü" : "İndirilenler";
+}
+
+// ------------------------------------------------------------ klavye izleme
+
+interface KeyLogEntry {
+  id: number;
+  label: string;
+  code: number;
+  ts: number;
+}
+
+/** Windows sanal tuş kodunu (VK_*) okunur bir etikete çevirir. */
+function keyLabel(code: number): string {
+  // Harfler ve rakamlar doğrudan karşılıklarını gösterir.
+  if (code >= 0x41 && code <= 0x5a) return String.fromCharCode(code);
+  if (code >= 0x30 && code <= 0x39) return String.fromCharCode(code);
+  if (code >= 0x70 && code <= 0x87) return `F${code - 0x70 + 1}`;
+
+  const named: Record<number, string> = {
+    0x08: "Backspace",
+    0x09: "Tab",
+    0x0d: "Enter",
+    0x10: "Shift",
+    0x11: "Ctrl",
+    0x12: "Alt",
+    0x14: "Caps Lock",
+    0x1b: "Escape",
+    0x20: "Boşluk",
+    0x25: "←",
+    0x26: "↑",
+    0x27: "→",
+    0x28: "↓",
+    0x2c: "PrintScreen",
+    0x2d: "Insert",
+    0x2e: "Delete",
+    0xa0: "Sol Shift",
+    0xa1: "Sağ Shift",
+    0xa2: "Sol Ctrl",
+    0xa3: "Sağ Ctrl",
+    0xa4: "Sol Alt",
+    0xa5: "Sağ Alt",
+    0x5b: "Windows",
+    0x5c: "Windows",
+  };
+  return named[code] ?? `VK ${code}`;
+}
+
+/** Klavye izleme penceresi: seçili cihazın canlı tuş akışı. */
+function KeyMonitorDialog({
+  open,
+  device,
+  monitoring,
+  events,
+  onToggle,
+  onClose,
+}: {
+  open: boolean;
+  device: DeviceView | null;
+  monitoring: boolean;
+  events: KeyLogEntry[];
+  onToggle: () => Promise<unknown>;
+  onClose: () => void;
+}) {
+  const { guard } = useToast();
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Yeni tuş geldikçe liste en alta kayar.
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [events]);
+
+  return (
+    <Modal
+      open={open}
+      title={device ? `${device.hostname} — klavye izleme` : "Klavye izleme"}
+      onClose={onClose}
+      width="md"
+      footer={
+        <>
+          {device && (
+            <Button
+              tone={monitoring ? "danger" : "accent"}
+              onClick={() => void guard(onToggle())}
+              disabled={!device.online}
+            >
+              {monitoring ? "Yakalamayı Durdur" : "Yakala"}
+            </Button>
+          )}
+          <Button onClick={onClose}>Kapat</Button>
+        </>
+      }
+    >
+      {!device ? (
+        <Empty title="Cihaz seçilmedi" />
+      ) : !device.online ? (
+        <Empty
+          title="Cihaz bağlı değil"
+          detail="Klavye izleme için öğrencinin çevrimiçi olması gerekir."
+        />
+      ) : events.length === 0 ? (
+        <Empty
+          title={monitoring ? "Henüz tuş basılmadı" : "İzleme kapalı"}
+          detail={
+            monitoring
+              ? "Öğrencinin bastığı tuşlar burada canlı görünür."
+              : "Klavye İzle penceresindeki 'Yakala' ile izlemeyi başlatın."
+          }
+        />
+      ) : (
+        <div
+          ref={listRef}
+          className="h-[320px] overflow-y-auto rounded border border-[var(--color-stroke)]
+            bg-[var(--color-surface-2)] p-2"
+        >
+          <div className="flex flex-wrap gap-1">
+            {events.map((e) => (
+              <span
+                key={e.id}
+                className="inline-flex h-[28px] min-w-[28px] items-center justify-center rounded border
+                  border-[var(--color-stroke-strong)] bg-[var(--color-surface)] px-1.5
+                  font-mono text-[12.5px] text-[var(--color-text-1)]"
+                title={`VK ${e.code}`}
+              >
+                {e.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
 }

@@ -1137,6 +1137,21 @@ async fn handle_client_message(
             tracing::debug!(%device_id, %message_id, "mesaj görüldü");
         }
 
+        ClientMessage::KeyEvent { code, pressed, ts } => {
+            tracing::trace!(%device_id, code, pressed, ts, "tuş olayı alındı");
+            // Yalnızca izlenen cihazın tuşları UI'a gider; UI hangi cihazı
+            // izlediğine payload'daki `deviceId` ile bakar.
+            state.emit(
+                "key-event",
+                KeyEvent {
+                    device_id,
+                    code,
+                    pressed,
+                    ts,
+                },
+            );
+        }
+
         ClientMessage::Pong { .. } => {}
 
         // Yetkilendirme mesajları el sıkışmaya aittir; burada gelmeleri
@@ -1164,6 +1179,15 @@ struct HelpEvent {
     device_id: Uuid,
     hostname: String,
     note: Option<String>,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KeyEvent {
+    device_id: Uuid,
+    code: u16,
+    pressed: bool,
+    ts: u64,
 }
 
 /// Tek bir mesaj gönderir.

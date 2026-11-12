@@ -3,271 +3,97 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpenClass — okul laboratuvarları için açık kaynak sınıf yönetimi</title>
-<meta name="description" content="NetSupport School'a ücretsiz ve açık kaynak alternatif. Öğretmen yerel ağdaki öğrenci bilgisayarlarını bulur, eşleştirir ve ekranlarını canlı izler. Sunucu ve internet gerektirmez. GPL-3.0.">
+<title>OpenClass — bilgisayar laboratuvarını tek ekrandan yönet</title>
+<meta name="description" content="NetSupport School'a ücretsiz ve açık kaynak alternatif. Öğretmen, yerel ağdaki öğrenci ekranlarını izler, kontrol eder, kilitler ve dosya gönderir. Sunucu, internet ve abonelik yok.">
 <link rel="icon" href="assets/openclass-logo.svg">
-<meta property="og:title" content="OpenClass — açık kaynak sınıf yönetim yazılımı">
-<meta property="og:description" content="Okul bilgisayar laboratuvarları için sınıf yönetimi. Yerel ağda çalışır, sunucu ve abonelik yok.">
+<meta property="og:title" content="OpenClass — laboratuvarını tek ekrandan yönet">
+<meta property="og:description" content="Açık kaynak sınıf yönetimi. Yerel ağda çalışır, sunucu ve abonelik yok.">
 <meta property="og:image" content="assets/ogretmen-konsolu-acik.png">
 <style>
-/* ---------------------------------------------------------------------------
-   Belirteçler. Uygulamanın kendi paletinden alındı
-   (apps/teacher/src/styles.css) — site uygulamaya yabancı durmasın.
---------------------------------------------------------------------------- */
 :root {
-  --chrome: #f3f3f3;
+  --bg: #fafafa;
   --surface: #ffffff;
-  --surface-2: #fafafa;
-  --canvas: #ececec;
-  --stroke: #e1e1e1;
-  --stroke-strong: #c8c8c8;
-  --text: #1b1b1b;
-  --text-2: #5c5c5c;
-  --text-3: #8a8a8a;
-  --accent: #0f6cbd;
-  --accent-hover: #115ea3;
-  --accent-soft: #e5f0fb;
-  --accent-border: #a9c9e8;
-  --ok: #0f7b35;
-  --warn: #b45309;
-  --danger: #c42b1c;
-  --ink-deep: #0f172a;
-
-  --maxw: 1080px;
-  --r: 6px;
-  --mono: ui-monospace, "Cascadia Mono", "Consolas", "SFMono-Regular", monospace;
-  --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Inter", sans-serif;
+  --stroke: #e5e7eb;
+  --ink: #111827;
+  --ink-2: #4b5563;
+  --accent: #1d4ed8;
+  --accent-soft: #eef2ff;
+  --maxw: 960px;
+  --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
 }
-html[data-theme="dark"] {
-  --chrome: #202020;
-  --surface: #272727;
-  --surface-2: #2d2d2d;
-  --canvas: #1a1a1a;
-  --stroke: #3b3b3b;
-  --stroke-strong: #4a4a4a;
-  --text: #f0f0f0;
-  --text-2: #b4b4b4;
-  --text-3: #878787;
-  --accent: #60a5fa;
-  --accent-hover: #93c5fd;
-  --accent-soft: #1d3a5c;
-  --accent-border: #2f5d8f;
-  --ok: #4ade80;
-  --warn: #fbbf24;
-  --danger: #f87171;
-  --ink-deep: #0b1120;
-}
-
-* { box-sizing: border-box; }
+* { box-sizing: border-box; margin: 0; }
 html { scroll-behavior: smooth; }
 body {
-  margin: 0;
-  background: var(--canvas);
-  color: var(--text);
   font-family: var(--sans);
-  font-size: 16px;
+  color: var(--ink);
+  background: var(--bg);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   text-wrap: pretty;
 }
-@media (prefers-reduced-motion: reduce) {
-  html { scroll-behavior: auto; }
-  *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
-}
-a { color: var(--accent); text-decoration: none; }
-a:hover { color: var(--accent-hover); text-decoration: underline; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
-img { max-width: 100%; display: block; }
-code, kbd { font-family: var(--mono); font-size: .88em; }
-
 .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* --- Üst çubuk ------------------------------------------------------------ */
-header.top {
-  position: sticky; top: 0; z-index: 40;
-  background: color-mix(in srgb, var(--chrome) 88%, transparent);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--stroke);
-}
-.top .wrap { display: flex; align-items: center; gap: 20px; height: 56px; }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: -.01em; color: var(--text); }
+/* Üst çubuk */
+header.top { border-bottom: 1px solid var(--stroke); background: var(--surface); }
+.top .wrap { display: flex; align-items: center; height: 60px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; color: var(--ink); }
 .brand:hover { text-decoration: none; }
-.brand img { width: 26px; height: 26px; border-radius: 6px; }
-.brand .ver {
-  font: 500 11px/1 var(--mono); color: var(--text-2);
-  border: 1px solid var(--stroke-strong); border-radius: 99px; padding: 4px 7px;
-}
-nav.links { margin-left: auto; display: flex; align-items: center; gap: 22px; font-size: 14px; }
-nav.links a { color: var(--text-2); }
-nav.links a:hover { color: var(--text); text-decoration: none; }
-.theme-btn {
-  background: none; border: 1px solid var(--stroke-strong); color: var(--text-2);
-  width: 30px; height: 30px; border-radius: var(--r); cursor: pointer;
-  display: grid; place-items: center; font-size: 14px;
-}
-.theme-btn:hover { color: var(--text); border-color: var(--accent); }
-@media (max-width: 760px) { nav.links { gap: 16px; } nav.links a.hide-sm { display: none; } }
-@media (max-width: 460px) { nav.links { gap: 14px; font-size: 13.5px; } nav.links a.hide-xs { display: none; } .brand .ver { display: none; } }
+.brand img { width: 28px; height: 28px; }
+nav { margin-left: auto; display: flex; gap: 22px; font-size: 14px; color: var(--ink-2); }
+@media (max-width: 520px) { nav { gap: 14px; } }
 
-/* --- Hero ---------------------------------------------------------------- */
-.hero { padding: 76px 0 56px; background: var(--surface); border-bottom: 1px solid var(--stroke); }
-.hero .wrap { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,.82fr); gap: 56px; align-items: start; }
-@media (max-width: 900px) { .hero .wrap { grid-template-columns: 1fr; gap: 36px; } .hero { padding: 48px 0 40px; } }
-
-.eyebrow { font: 600 12px/1 var(--sans); letter-spacing: .09em; text-transform: uppercase; color: var(--accent); margin: 0 0 18px; }
-h1 { font-size: clamp(34px, 5vw, 50px); line-height: 1.08; letter-spacing: -.025em; margin: 0 0 20px; font-weight: 650; }
-.lede { font-size: 18px; color: var(--text-2); margin: 0 0 14px; max-width: 46ch; }
-.lede strong { color: var(--text); font-weight: 600; }
-
-.cta { display: flex; flex-wrap: wrap; gap: 12px; margin: 30px 0 0; }
+/* Hero */
+.hero { background: var(--surface); border-bottom: 1px solid var(--stroke); padding: 72px 0 60px; text-align: center; }
+.eyebrow { font: 600 12px/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin-bottom: 20px; }
+h1 { font-size: clamp(32px, 5.5vw, 46px); line-height: 1.1; letter-spacing: -.02em; font-weight: 720; max-width: 22ch; margin: 0 auto 16px; }
+.lede { font-size: 18px; color: var(--ink-2); max-width: 52ch; margin: 0 auto 32px; }
+.cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
 .btn {
-  display: inline-flex; align-items: center; gap: 9px;
-  padding: 11px 18px; border-radius: var(--r); font-size: 15px; font-weight: 550;
-  border: 1px solid transparent; cursor: pointer;
+  display: inline-block; padding: 12px 22px; border-radius: 8px;
+  font-family: inherit; font-size: 15px; font-weight: 600; cursor: pointer; text-decoration: none;
 }
-.btn:hover { text-decoration: none; }
 .btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover { background: var(--accent-hover); color: #fff; }
-html[data-theme="dark"] .btn-primary { color: var(--ink-deep); }
-.btn-ghost { border-color: var(--text-2); color: var(--text); background: var(--surface); }
-.btn-ghost:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
-.btn small { font-weight: 400; color: color-mix(in srgb, currentColor 65%, transparent); }
+.btn-primary:hover { text-decoration: none; filter: brightness(1.08); }
+.btn-ghost { background: var(--surface); color: var(--ink); border: 1px solid var(--stroke); }
+.btn-ghost:hover { background: var(--accent-soft); text-decoration: none; }
 
-.hero-facts { list-style: none; margin: 26px 0 0; padding: 0; display: grid; gap: 11px; }
-.hero-facts li { position: relative; padding-left: 22px; font-size: 15px; color: var(--text-2); }
-.hero-facts li::before {
-  content: ""; position: absolute; left: 2px; top: 9px;
-  width: 7px; height: 7px; border-radius: 2px; background: var(--accent);
-}
-.hero-facts b { color: var(--text); font-weight: 600; }
-
-/* Protokol kartı — sahte metrik değil, gerçek port/şifre bilgisi */
-.net-card {
-  background: var(--surface-2); border: 1px solid var(--stroke); border-radius: var(--r);
-  padding: 20px 22px; font-family: var(--mono); font-size: 13px; line-height: 1.75;
-}
-.net-card h3 {
-  font: 600 11px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase;
-  color: var(--text-2); margin: 0 0 16px;
-}
-.net-row { display: grid; grid-template-columns: 92px 1fr; gap: 14px; padding: 7px 0; border-top: 1px solid var(--stroke); }
-.net-row:first-of-type { border-top: 0; }
-.net-row dt { color: var(--accent); }
-.net-row dd { margin: 0; color: var(--text-2); }
-.net-row dd b { color: var(--text); font-weight: 600; }
-.net-note { margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--stroke); font-family: var(--sans); font-size: 13px; color: var(--text-3); }
-
-/* --- Uyarı şeridi -------------------------------------------------------- */
-.notice { background: var(--surface-2); border-bottom: 1px solid var(--stroke); padding: 16px 0; }
-.notice .wrap { display: flex; gap: 14px; align-items: baseline; font-size: 14.5px; color: var(--text-2); }
-.notice .tag {
-  flex: none; font: 600 11px/1 var(--sans); letter-spacing: .07em; text-transform: uppercase;
-  color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
-  border-radius: 99px; padding: 5px 9px;
-}
-.notice b { color: var(--text); font-weight: 600; }
-
-/* --- Bölümler ------------------------------------------------------------ */
-section { padding: 72px 0; border-bottom: 1px solid var(--stroke); }
-section.alt { background: var(--surface); }
-@media (max-width: 760px) { section { padding: 52px 0; } }
-.sec-head { max-width: 62ch; margin: 0 0 40px; }
-.sec-head h2 { font-size: clamp(24px, 3vw, 31px); letter-spacing: -.02em; line-height: 1.18; margin: 0 0 12px; font-weight: 650; }
-.sec-head p { margin: 0; color: var(--text-2); font-size: 16.5px; }
-
-/* Rol sütunları: iki uygulama, eşit değil — öğretmen baskın */
-.roles { display: grid; grid-template-columns: 1.25fr 1fr; gap: 0; border: 1px solid var(--stroke); border-radius: var(--r); overflow: hidden; background: var(--surface-2); }
-@media (max-width: 820px) { .roles { grid-template-columns: 1fr; } }
-.role { padding: 28px 30px; }
-.role + .role { border-left: 1px solid var(--stroke); }
-@media (max-width: 820px) { .role + .role { border-left: 0; border-top: 1px solid var(--stroke); } }
-.role h3 { margin: 0 0 4px; font-size: 19px; letter-spacing: -.01em; }
-.role .file { font-family: var(--mono); font-size: 12.5px; color: var(--text-3); margin: 0 0 20px; }
-.role ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
-.role li { font-size: 14.5px; color: var(--text-2); padding-left: 18px; position: relative; }
-.role li::before { content: "·"; position: absolute; left: 4px; color: var(--text-3); font-weight: 700; }
-.role li b { color: var(--text); font-weight: 600; }
-
-/* --- Durum tablosu ------------------------------------------------------- */
-.status-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-@media (max-width: 900px) { .status-grid { grid-template-columns: 1fr; } }
-.status-col { background: var(--surface-2); border: 1px solid var(--stroke); border-radius: var(--r); padding: 22px 24px; }
-.status-col > h3 { display: flex; align-items: center; gap: 9px; margin: 0 0 4px; font-size: 15px; }
-.status-col > p { margin: 0 0 18px; font-size: 13px; color: var(--text-3); }
-.dot { width: 8px; height: 8px; border-radius: 99px; flex: none; }
-.dot.ok { background: var(--ok); }
-.dot.warn { background: var(--warn); }
-.dot.off { background: var(--text-3); }
-.status-col ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 9px; }
-.status-col li { font-size: 14px; color: var(--text-2); padding-left: 16px; position: relative; }
-.status-col li::before { content: ""; position: absolute; left: 0; top: 9px; width: 6px; height: 1px; background: var(--stroke-strong); }
-.verify-note { margin: 26px 0 0; padding: 18px 20px; border-left: 2px solid var(--accent-border); background: var(--accent-soft); border-radius: 0 var(--r) var(--r) 0; font-size: 14.5px; color: var(--text-2); }
-html[data-theme="dark"] .verify-note { color: var(--text); }
-.verify-note b { color: var(--text); }
-
-/* --- Ekran görüntüleri --------------------------------------------------- */
-.shots { display: grid; gap: 14px; }
-.shot-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
-.shot-tab {
-  background: var(--surface-2); border: 1px solid var(--stroke); color: var(--text-2);
-  padding: 8px 14px; border-radius: var(--r); font-size: 13.5px; cursor: pointer; font-family: inherit;
-}
-.shot-tab:hover { color: var(--text); border-color: var(--stroke-strong); }
-.shot-tab[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent); font-weight: 600; }
-html[data-theme="dark"] .shot-tab[aria-selected="true"] { color: var(--text); }
-.shot-frame { border: 1px solid var(--stroke); border-radius: var(--r); overflow: hidden; background: var(--chrome); }
-.shot-frame img { width: 100%; height: auto; }
-.shot-cap { margin: 0; font-size: 13.5px; color: var(--text-2); }
-
-/* --- İndirme ------------------------------------------------------------- */
-.dl-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
-@media (max-width: 820px) { .dl-grid { grid-template-columns: 1fr; } }
-.dl-card { border: 1px solid var(--stroke); border-radius: var(--r); background: var(--surface-2); padding: 24px 26px; display: flex; flex-direction: column; }
-.dl-card.rec { border-color: var(--accent-border); background: var(--accent-soft); }
-html[data-theme="dark"] .dl-card.rec { background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface-2)); }
-.dl-card h3 { margin: 0 0 6px; font-size: 17px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.pill { font: 600 10.5px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; padding: 4px 8px; border-radius: 99px; background: var(--accent); color: #fff; }
-html[data-theme="dark"] .pill { color: var(--ink-deep); }
-.dl-card > p { margin: 0 0 20px; font-size: 14px; color: var(--text-2); }
-.dl-links { list-style: none; margin: 0 0 18px; padding: 0; display: grid; gap: 8px; }
-.dl-links a { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--stroke); border-radius: var(--r); background: var(--surface); font-family: var(--mono); font-size: 12.5px; }
-.dl-links a:hover { border-color: var(--accent); text-decoration: none; }
-.dl-links .size { color: var(--text-3); flex: none; }
-.dl-foot { margin: auto 0 0; font-size: 13px; color: var(--text-3); }
-.req { margin: 24px 0 0; font-size: 14px; color: var(--text-2); }
-.req code { background: var(--surface-2); border: 1px solid var(--stroke); border-radius: 3px; padding: 1px 5px; }
-
-/* --- Güvenlik ------------------------------------------------------------ */
-.sec-list { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 0 44px; }
-@media (max-width: 820px) { .sec-list { grid-template-columns: 1fr; } }
-.sec-list div { padding: 18px 0; border-top: 1px solid var(--stroke); }
-.sec-list h3 { margin: 0 0 6px; font-size: 15px; }
-.sec-list p { margin: 0; font-size: 14.5px; color: var(--text-2); }
-.sec-list .no h3 { color: var(--danger); }
-
-/* --- Mimari diyagram ----------------------------------------------------- */
-pre.diagram {
-  font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--text-2);
-  background: var(--surface-2); border: 1px solid var(--stroke); border-radius: var(--r);
-  padding: 22px; overflow-x: auto; margin: 0;
+/* Ekran görüntüsü */
+.shot { padding: 40px 0 10px; }
+.shot img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px; border: 1px solid var(--stroke);
+  box-shadow: 0 20px 50px -20px rgba(0,0,0,.25);
+  margin: 0 auto;
 }
 
-/* --- Yol haritası -------------------------------------------------------- */
-.roadmap { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
-.roadmap li { display: grid; grid-template-columns: 96px 1fr; gap: 20px; padding: 16px 0; border-top: 1px solid var(--stroke); align-items: baseline; }
-.roadmap li:first-child { border-top: 0; }
-.roadmap .when { font: 600 12px/1.5 var(--mono); color: var(--text-3); }
-.roadmap .what { font-size: 15px; color: var(--text-2); }
-.roadmap .what b { color: var(--text); font-weight: 600; }
-@media (max-width: 620px) { .roadmap li { grid-template-columns: 1fr; gap: 4px; } }
+/* Tanıtım blokları */
+section.block { padding: 60px 0; border-bottom: 1px solid var(--stroke); }
+section.block:last-child { border-bottom: none; }
+.block h2 { font-size: 26px; letter-spacing: -.015em; font-weight: 700; margin-bottom: 14px; }
+.block .sub { color: var(--ink-2); max-width: 58ch; margin-bottom: 26px; }
+.features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+@media (max-width: 640px) { .features { grid-template-columns: 1fr; } }
+.feature {
+  background: var(--surface); border: 1px solid var(--stroke); border-radius: 10px;
+  padding: 18px 18px; display: flex; flex-direction: column; gap: 4px;
+}
+.feature strong { font-size: 15px; }
+.feature span { font-size: 13.5px; color: var(--ink-2); }
 
-/* --- Alt --------------------------------------------------------------- */
-footer { padding: 44px 0 56px; background: var(--chrome); }
-footer .wrap { display: flex; flex-wrap: wrap; gap: 28px; justify-content: space-between; align-items: flex-start; font-size: 14px; color: var(--text-2); }
-footer .cols { display: flex; flex-wrap: wrap; gap: 48px; }
-footer h4 { margin: 0 0 10px; font-size: 12px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-3); font-weight: 600; }
-footer ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
-footer .lic { max-width: 34ch; }
+/* İndir */
+.dl { background: var(--accent-soft); border-radius: 12px; padding: 28px; text-align: center; }
+.dl h3 { font-size: 20px; margin-bottom: 8px; }
+.dl p { color: var(--ink-2); margin-bottom: 18px; }
+
+/* Alt bilgi */
+footer { padding: 28px 0 40px; color: var(--ink-2); font-size: 13.5px; }
+footer .wrap { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+footer .ml { margin-left: auto; }
 </style>
 </head>
 <body>
@@ -275,418 +101,76 @@ footer .lic { max-width: 34ch; }
 <header class="top">
   <div class="wrap">
     <a class="brand" href="#">
-      <img src="assets/openclass-logo.svg" alt="">
+      <img src="assets/openclass-logo.svg" alt="OpenClass">
       OpenClass
-      <span class="ver">v0.2.0</span>
     </a>
-    <nav class="links">
-      <a href="#ozellikler" class="hide-sm">Özellikler</a>
-      <a href="#durum" class="hide-xs">Durum</a>
+    <nav>
+      <a href="#ozellikler">Özellikler</a>
       <a href="#indir">İndir</a>
-      <a href="#guvenlik" class="hide-sm">Güvenlik</a>
-      <a href="https://github.com/selmancuzdan42/openclass">GitHub</a>
-      <button class="theme-btn" id="theme" type="button" aria-label="Koyu / açık tema">◐</button>
+      <a href="#hakkimda">Hakkında</a>
     </nav>
   </div>
 </header>
 
 <div class="hero">
   <div class="wrap">
-    <div>
-      <p class="eyebrow">Açık kaynak sınıf yönetimi</p>
-      <h1>Laboratuvardaki her ekran, öğretmenin masasında.</h1>
-      <p class="lede">
-        OpenClass, okul bilgisayar laboratuvarları için sınıf yönetim yazılımıdır —
-        ticari <strong>NetSupport School</strong>'a ücretsiz ve açık kaynak alternatif.
-        Öğretmen yerel ağdaki bilgisayarları bulur, güvenli biçimde eşleştirir,
-        ekranlarını canlı izler ve gerektiğinde devralır.
-      </p>
-      <div class="cta">
-        <a class="btn btn-primary" href="#indir">Windows için indir <small>· 0.2.0</small></a>
-        <a class="btn btn-ghost" href="https://github.com/selmancuzdan42/openclass">Kaynak kodu</a>
-      </div>
-      <ul class="hero-facts">
-        <li><b>Sunucu yok.</b> Öğretmen uygulaması bağlantı sunucusunu kendi içinde barındırır.</li>
-        <li><b>İnternet yok.</b> Yerel ağda çalışır; bulut hesabı, abonelik, lisans sunucusu yok.</li>
-        <li><b>İki dosya.</b> <code>OpenClass-Teacher.exe</code> ve <code>OpenClass-Student.exe</code>.</li>
-        <li><b>Gizli izleme yok.</b> Ekran paylaşıldığında öğrenci bunu her zaman görür.</li>
-      </ul>
-    </div>
-
-    <div class="net-card">
-      <h3>Ağda ne olup bitiyor</h3>
-      <dl>
-        <div class="net-row"><dt>UDP 7644/5</dt><dd>Keşif. Şifresiz, <b>hiçbir yetki vermez</b>.</dd></div>
-        <div class="net-row"><dt>TCP 7643</dt><dd>TLS + WebSocket, MessagePack. Yetkili tüm trafik.</dd></div>
-        <div class="net-row"><dt>UDP 7646</dt><dd>Öğretmen ekranı multicast, <b>ChaCha20-Poly1305</b>.</dd></div>
-        <div class="net-row"><dt>Kimlik</dt><dd>Cihaza özgü <b>Ed25519</b> anahtarı + TLS parmak izi sabitleme.</dd></div>
-        <div class="net-row"><dt>Ekran</dt><dd>Yalnızca değişen bölgeler, ham JPEG, ikili çerçeve.</dd></div>
-      </dl>
-      <p class="net-note">
-        Eşleştirme 6 haneli kodla yapılır ve sertifika o anda sabitlenir —
-        hostname değişse de cihaz aynı kalır.
-      </p>
+    <p class="eyebrow">Bilgisayar laboratuvarları için · Açık kaynak</p>
+    <h1>Laboratuvardaki her ekran, öğretmenin masasında.</h1>
+    <p class="lede">OpenClass, NetSupport School'a ücretsiz ve açık kaynak bir alternatif. Öğretmen, yerel ağdaki öğrenci bilgisayarlarını tek pencereden izler, kontrol eder ve yönetir — sunucu, internet veya abonelik olmadan.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="#indir">Ücretsiz indir</a>
+      <a class="btn btn-ghost" href="#ozellikler">Özellikleri gör</a>
     </div>
   </div>
 </div>
 
-<div class="notice">
+<div class="shot">
   <div class="wrap">
-    <span class="tag">Dürüst durum</span>
-    <p style="margin:0">
-      0.2.0 <b>gerçek sınıf ortamında henüz denenmedi.</b> Kod doğrulandı — 156 birim testi,
-      Windows hedefinde lint ve test — ama saha testi yapılmadı. Laboratuvara dağıtmadan önce
-      birkaç makinede deneyin. Neyin doğrulandığı <a href="#durum">aşağıda tek tek yazılı</a>.
-    </p>
+    <img src="assets/ogretmen-konsolu-acik.png" alt="Öğretmen konsolu — öğrenci ekranları tek pencerede">
   </div>
 </div>
 
-<section class="alt" id="ozellikler">
+<section class="block" id="ozellikler">
   <div class="wrap">
-    <div class="sec-head">
-      <h2>İki uygulama, iki farklı iş</h2>
-      <p>
-        Öğretmen konsolu bütün yetkiyi taşır. Öğrenci tarafı bilinçli olarak neredeyse boştur:
-        günlük kullanımda öğrencinin yapacağı hiçbir ayar yoktur.
-      </p>
-    </div>
-    <div class="roles">
-      <div class="role">
-        <h3>Öğretmen konsolu</h3>
-        <p class="file">OpenClass-Teacher.exe</p>
-        <ul>
-          <li><b>Küçük resim ızgarası.</b> Bağlı bilgisayarların ekranları canlı; çift tıkla büyür. Ayrıntılı tablo görünümüne geçilebilir.</li>
-          <li><b>Laboratuvar süzgeci.</b> Açılışta hangi odanın yönetileceği sorulur: oda adı, bilgisayar adı ön eki (<code>LAB1</code> → <code>LAB101…</code>) veya tümü.</li>
-          <li><b>Ekran yayını.</b> Öğretmenin ekranı öğrencilere multicast ile gider — kare telden bir kez geçer. Pencereli veya tam ekran.</li>
-          <li><b>Uzaktan kontrol.</b> İzinli fare, klavye ve kaydırma devralma; öğrencide kapatılamayan gösterge durur.</li>
-          <li><b>Ekran kilidi.</b> Klavye ve fare kilidi, zaman aşımlı. Ctrl+Alt+Del engellenmez.</li>
-          <li><b>Dosya gönder ve al.</b> Hedef klasör öğrencinin gezgininden seçilir; özet (hash) doğrulamalı.</li>
-          <li><b>Mesaj ve yardım talebi.</b> Öğrenci tepsi menüsünden yardım ister, konsolda görünür.</li>
-          <li><b>IP aralığı taraması.</b> <code>192.168.1.10-40</code> — yayının engellendiği ağlarda unicast probe.</li>
-        </ul>
-      </div>
-      <div class="role">
-        <h3>Öğrenci ajanı</h3>
-        <p class="file">OpenClass-Student.exe</p>
-        <ul>
-          <li><b>İlk açılış sihirbazı.</b> İki adım: laboratuvar adı, ardından eşleştirme. Sonra bir daha görünmez.</li>
-          <li><b>Sistem tepsisinde çalışır.</b> Pencere yok, menü yok, ayar paneli yok.</li>
-          <li><b>Durum göstergesi.</b> Tepsi simgesi bağlantıyı ve paylaşımı gösterir; <b>“EKRANINIZ PAYLAŞILIYOR”</b> uyarısı bastırılamaz.</li>
-          <li><b>Yardım isteme.</b> Sağ tık menüsünden öğretmene talep gönderir.</li>
-          <li><b>Otomatik başlatma.</b> Windows açılışında ajan kendiliğinden gelir.</li>
-          <li><b>Yapılandırma penceresi</b> yalnızca kurulum ve sorun giderme için; onu da öğretmen ya da yönetici açar.</li>
-        </ul>
-      </div>
-    </div>
-
-    <h2 style="font-size:19px;letter-spacing:-.01em;margin:48px 0 16px">Ders akışı</h2>
-    <pre class="diagram">                    UDP 7644/7645 (keşif)
-   ┌─────────────────┐ ◄──────────────► ┌──────────────────┐
-   │ OpenClass       │                  │ OpenClass        │
-   │ Teacher         │ ◄══════════════► │ Student          │
-   │ (konsol+sunucu) │  TCP 7643        │ (ajan)           │
-   │                 │  TLS+WebSocket   │                  │
-   │                 │  MessagePack     │                  │
-   │                 │                  │                  │
-   │                 │ ──────────────►  │                  │
-   └─────────────────┘  UDP 7646        └──────────────────┘
-                        multicast
-                        (ChaCha20-Poly1305)</pre>
-    <p style="font-size:14.5px;color:var(--text-2);margin:16px 0 0;max-width:68ch">
-      Ayrı bir “dersi başlat” adımı yoktur. Konsol açıkken bağlanan bilgisayarların önizlemesi
-      kendiliğinden gelir, konsolu kapatınca bütün yayınlar, kilitler ve uzaktan kontrol durur.
-    </p>
-  </div>
-</section>
-
-<section id="ekranlar">
-  <div class="wrap">
-    <div class="sec-head">
-      <h2>Arayüz</h2>
-      <p>
-        Yoğunluk bilinçli: bu bir web panosu değil, öğretmenin ders boyunca önünde duracağı bir
-        masaüstü aracı. Tipografi 12–13 px, köşeler küçük, gölge neredeyse yok — Windows’un
-        Fluent paletine yakın durması için.
-      </p>
-    </div>
-    <div class="shots">
-      <div class="shot-tabs" role="tablist" aria-label="Ekran görüntüleri">
-        <button class="shot-tab" role="tab" aria-selected="true"  data-src="assets/ogretmen-konsolu-acik.png"      data-cap="Öğretmen konsolu — küçük resim ızgarası, komut şeridi ve laboratuvar grupları.">Öğretmen konsolu</button>
-        <button class="shot-tab" role="tab" aria-selected="false" data-src="assets/ogretmen-konsolu-koyu.png"      data-cap="Aynı konsol, koyu tema.">Koyu tema</button>
-        <button class="shot-tab" role="tab" aria-selected="false" data-src="assets/ogretmen-ayrintili-liste.png"   data-cap="Ayrıntılı liste görünümü — oda, bilgisayar adı, IP ve durum sütunları.">Ayrıntılı liste</button>
-        <button class="shot-tab" role="tab" aria-selected="false" data-src="assets/ogrenci-yapilandirma.png"       data-cap="Öğrenci yapılandırma penceresi. Normal kullanımda görünmez; ajan tepsidedir.">Öğrenci kurulumu</button>
-        <button class="shot-tab" role="tab" aria-selected="false" data-src="assets/ogrenci-mesaj.png"              data-cap="Öğretmenden gelen mesaj, öğrenci tarafında.">Öğrenci mesajı</button>
-      </div>
-      <div class="shot-frame">
-        <img id="shot-img" src="assets/ogretmen-konsolu-acik.png" alt="OpenClass öğretmen konsolu">
-      </div>
-      <p class="shot-cap" id="shot-cap">Öğretmen konsolu — küçük resim ızgarası, komut şeridi ve laboratuvar grupları.</p>
-      <p class="shot-cap" style="color:var(--text-3)">
-        Görüntüler arayüz geliştirme için kullanılan sahte veriyle alınmıştır; ekran içerikleri
-        gerçek öğrenci masaüstleri değildir.
-      </p>
+    <h2>Ders boyunca yanınızda olan tüm kontroller</h2>
+    <p class="sub">İki küçük uygulama: öğretmen konsolu ve öğrenci ajanı. Yerel ağda otomatik birbirini bulur, güvenli biçimde bağlanır.</p>
+    <div class="features">
+      <div class="feature"><strong>Ekran izleme</strong><span>Öğrencilerin ekranlarını canlı görün, küçük veya büyük.</span></div>
+      <div class="feature"><strong>Uzaktan kontrol</strong><span>İhtiyaç olduğunda öğrencinin bilgisayarını siz yönetin.</span></div>
+      <div class="feature"><strong>Ekran kilidi</strong><span>Dersi kesmeden, tek tıkla ekranları geçici kilitler.</span></div>
+      <div class="feature"><strong>İnternet engelleme</strong><span>Öğrencinin internete çıkışını kesin, öğretmen bağlantısı açık kalsın.</span></div>
+      <div class="feature"><strong>Dosya gönderme / alma</strong><span>Ders notlarını toplu dağıtın, ödevleri toplayın — Windows Gezgini ile.</span></div>
+      <div class="feature"><strong>Klavye izleme</strong><span>Öğrencinin ne yazdığını görün (şeffaf — öğrenciye gösterilir).</span></div>
+      <div class="feature"><strong>Yardım talepleri</strong><span>Öğrenciler sizden anında destek istesin.</span></div>
+      <div class="feature"><strong>Gösterim</strong><span>Kendi ekranınızı öğrencilere tam ekran yayınlayın.</span></div>
     </div>
   </div>
 </section>
 
-<section class="alt" id="durum">
+<section class="block" id="indir">
   <div class="wrap">
-    <div class="sec-head">
-      <h2>Ne çalışıyor, ne çalışmıyor</h2>
-      <p>
-        Bir sınıf yönetim yazılımı yarım çalışırsa dersi bozar. Bu yüzden durum üç sütunda,
-        süsleme olmadan yazılı — <code>README</code> ve <code>docs/TEST-PLANI.md</code> ile aynı liste.
-      </p>
-    </div>
-    <div class="status-grid">
-      <div class="status-col">
-        <h3><span class="dot ok"></span> Gerçek donanımda doğrulandı</h3>
-        <p>Windows makinelerde uçtan uca denendi.</p>
-        <ul>
-          <li>Ağda keşif ve duyuru</li>
-          <li>6 haneli kodla eşleştirme</li>
-          <li>TLS bağlantısı ve parmak izi sabitleme</li>
-          <li>Windows ekran yakalama (WGC + DXGI yedek)</li>
-          <li>Öğrenci ekranının konsolda görüntülenmesi</li>
-          <li>Uzaktan kontrol (fare / klavye)</li>
-          <li>Ekran ve girdi kilidi</li>
-          <li>Linux’tan Windows’a derleme + NSIS kurulum paketi</li>
-        </ul>
-      </div>
-      <div class="status-col">
-        <h3><span class="dot warn"></span> Kod hazır, saha testi yok</h3>
-        <p>Derleniyor, birim testleri geçiyor; işletim sistemi çağrıları sahada kanıtlanır.</p>
-        <ul>
-          <li>Dosya gönderme ve alma</li>
-          <li>Uzak dosya gezgini (listele + indir)</li>
-          <li>UDP multicast ekran yayını</li>
-          <li>Otomatik başlatma</li>
-          <li>Laboratuvar / oda adı süzgeci</li>
-          <li>Öğrenci kurulum sihirbazı</li>
-          <li>IP aralığı taraması</li>
-          <li>Veritabanı şema yükseltmesi (0.1.0 → 0.2.0)</li>
-        </ul>
-      </div>
-      <div class="status-col">
-        <h3><span class="dot off"></span> Henüz yapılmadı</h3>
-        <p>Yol haritasında; bu sürümde yok.</p>
-        <ul>
-          <li>Sınav, anket ve yoklama modülleri</li>
-          <li>Linux’ta gerçek ekran yakalama <br><span style="color:var(--text-3);font-size:13px">(öğretmen ekranını yayınlamak Windows gerektirir; Linux’ta yalnızca test deseni)</span></li>
-          <li>Çoklu monitör desteği</li>
-          <li>Uzak gezginde yazma ve silme <br><span style="color:var(--text-3);font-size:13px">(protokolde tanımlı değil — bilinçli)</span></li>
-        </ul>
-      </div>
-    </div>
-    <p class="verify-note">
-      <b>Neden bu kadar ayrıntı?</b> <code>SendInput</code> ve <code>BlockInput</code> gibi çağrılar
-      ancak gerçek makinede kanıtlanır. Çekirdek katmanlar (protokol, eşleştirme, bölge aktarımı,
-      SQLite kaydı, hostname araması, laboratuvar grupları) <b>birim testli</b>; sürüm,
-      <code>docs/TEST-PLANI.md</code> içindeki senaryolar gerçek cihazlarda geçtiğinde tamamlanmış
-      sayılacak.
-    </p>
-  </div>
-</section>
-
-<section id="indir">
-  <div class="wrap">
-    <div class="sec-head">
-      <h2>İndir</h2>
-      <p>Windows 10 (1809+) ve Windows 11, 64 bit. Sürüm 0.2.0 — “laboratuvar desteği, ilk kurulum sihirbazı, oturumsuz akış”.</p>
-    </div>
-    <div class="dl-grid">
-      <div class="dl-card rec">
-        <h3>Kurulumsuz <span class="pill">Önerilen</span></h3>
-        <p>Çift tıkla çalışır, kurulum yok. Güncel Windows 10 ve bütün Windows 11 kurulumlarında WebView2 zaten var — denemenin en hızlı yolu.</p>
-        <ul class="dl-links">
-          <li><a href="https://github.com/selmancuzdan42/openclass/releases/download/v0.2.0/OpenClass-Teacher.exe">OpenClass-Teacher.exe <span class="size">~11 MB</span></a></li>
-          <li><a href="https://github.com/selmancuzdan42/openclass/releases/download/v0.2.0/OpenClass-Student.exe">OpenClass-Student.exe <span class="size">~9 MB</span></a></li>
-        </ul>
-        <p class="dl-foot">Öğretmen bilgisayarına Teacher, öğrenci bilgisayarlarına Student.</p>
-      </div>
-      <div class="dl-card">
-        <h3>Kurulum paketi</h3>
-        <p>WebView2 çalışma zamanını kendisi kurar, internet gerekmez. LTSC sürümleri, Edge’in kaldırıldığı sistemler ve hiç güncellenmemiş imajlar için. Başlat menüsü kısayolu ve kaldırma kaydı oluşturur — <b>laboratuvara dağıtım için doğru olan budur</b>.</p>
-        <ul class="dl-links">
-          <li><a href="https://github.com/selmancuzdan42/openclass/releases/download/v0.2.0/OpenClass.Teacher_0.2.0_x64-setup.exe">OpenClass Teacher setup <span class="size">~220 MB</span></a></li>
-          <li><a href="https://github.com/selmancuzdan42/openclass/releases/download/v0.2.0/OpenClass.Student_0.2.0_x64-setup.exe">OpenClass Student setup <span class="size">~220 MB</span></a></li>
-        </ul>
-        <p class="dl-foot">Boyutun 220 MB olması çalışma zamanının çevrimdışı kurucusundan; uygulamanın kendisi 10 MB. Kurulum yönetici hakkı ister.</p>
-      </div>
-    </div>
-    <p class="req">
-      Bütünlük: <a href="https://github.com/selmancuzdan42/openclass/releases/download/v0.2.0/SHA256SUMS.txt"><code>SHA256SUMS.txt</code></a>
-      dört dosyanın da özetlerini taşır ·
-      <a href="https://github.com/selmancuzdan42/openclass/releases">bütün sürümler</a> ·
-      Kurulum rehberleri: <a href="https://github.com/selmancuzdan42/openclass/blob/main/docs/OGRETMEN-REHBERI.md">öğretmen</a>,
-      <a href="https://github.com/selmancuzdan42/openclass/blob/main/docs/OGRENCI-KURULUM.md">öğrenci</a>
-    </p>
-    <p class="req">
-      İlk açılışta Windows Güvenlik Duvarı sorarsa <b>Özel ağlarda izin ver</b> seçin.
-      0.1.0’dan yükseltenlerde veritabanı kendiliğinden güncellenir ve <b>eşleştirmeler korunur</b>;
-      eski ve yeni sürümler birlikte çalışır.
-    </p>
-  </div>
-</section>
-
-<section class="alt" id="guvenlik">
-  <div class="wrap">
-    <div class="sec-head">
-      <h2>Güvenlik ve sınırlar</h2>
-      <p>
-        Bu yazılım öğrencilerin bilgisayarlarını izliyor. Yetki nerede başlıyor, nerede bitiyor —
-        açıkça yazmak zorunlu. Tam metin: <a href="https://github.com/selmancuzdan42/openclass/blob/main/SECURITY.md">SECURITY.md</a>.
-      </p>
-    </div>
-    <div class="sec-list">
-      <div>
-        <h3>Şifreli bağlantı, sabitlenmiş sertifika</h3>
-        <p>Trafik TLS ile korunur; sertifika eşleştirme anında sabitlenir, sonradan değişirse bağlantı reddedilir.</p>
-      </div>
-      <div>
-        <h3>Cihaz kimliği, hostname değil</h3>
-        <p>Doğrulama cihaza özgü Ed25519 anahtarıyla yapılır — bilgisayar adı değişse de kimlik aynı kalır.</p>
-      </div>
-      <div>
-        <h3>Ekran görüntüsü diske yazılmaz</h3>
-        <p>Kareler bellekte kalır; kayıt, arşiv veya geçmiş özelliği yok.</p>
-      </div>
-      <div>
-        <h3>Gösterge kapatılamaz</h3>
-        <p>Tepsi simgesi her zaman görünür ve paylaşım sırasında değişir. Simgeyi gizleyen bir seçenek yok.</p>
-      </div>
-      <div>
-        <h3>Kilidin zaman aşımı var</h3>
-        <p>Kilit ve uzaktan kontrol sırasında öğrencide kapatılamayan bir gösterge durur; Ctrl+Alt+Del engellenmez.</p>
-      </div>
-      <div>
-        <h3>Uzak gezgin yalnızca okur</h3>
-        <p>Listeleme ve indirme var; yazma ve silme protokolde tanımlı bile değil. Kapsam öğrenci tarafında kısıtlanır.</p>
-      </div>
-      <div class="no">
-        <h3>Olmayan ve eklenmeyecek olanlar</h3>
-        <p>Gizli erişim, keylogger, parola toplama, güvenlik yazılımı atlatma. Bunlar eksik özellik değil, <b>reddedilmiş</b> özelliktir.</p>
-      </div>
-      <div>
-        <h3>GPL-3.0-or-later</h3>
-        <p>Kodun tamamı açık; bütün bağımlılıklar izin verici lisanslı (MIT / Apache-2.0 / ISC / kamu malı) ve GPL-3.0 ile uyumlu.</p>
-      </div>
+    <div class="dl">
+      <h3>Ücretsiz ve açık kaynak</h3>
+      <p>Windows için hazır kurulumsuz programlar. Sunucu kurulumu, hesap ve abonelik yok.</p>
+      <a class="btn btn-primary" href="#indir">GitHub'dan indir</a>
     </div>
   </div>
 </section>
 
-<section id="gelisim">
+<section class="block" id="hakkimda">
   <div class="wrap">
-    <div class="sec-head">
-      <h2>Nereden geldi, nereye gidiyor</h2>
-      <p>Değişikliklerin tamamı <a href="https://github.com/selmancuzdan42/openclass/blob/main/CHANGELOG.md">CHANGELOG.md</a> içinde.</p>
-    </div>
-    <ul class="roadmap">
-      <li>
-        <span class="when">0.1.0</span>
-        <span class="what"><b>İlk sürüm.</b> Keşif, eşleştirme, canlı öğrenci ekranları, uzaktan kontrol, ekran kilidi, dosya aktarımı, öğretmen ekranı yayını. Windows’ta ekran yakalama doğrulandı.</span>
-      </li>
-      <li>
-        <span class="when">0.2.0 <span style="color:var(--accent)">· güncel</span></span>
-        <span class="what"><b>Laboratuvar desteği.</b> Oda adı keşif duyurusunda taşınıyor, açılışta laboratuvar seçimi, öğrenci kurulum sihirbazı, IP aralığı taraması. <b>Ders oturumu kavramı kaldırıldı</b> — “başlat/bitir” yok, konsol açıkken önizleme kendiliğinden gelir. Dosya gönder/al şeritte yan yana, hedef klasör öğrencinin gezgininden seçiliyor.</span>
-      </li>
-      <li>
-        <span class="when">Sonraki</span>
-        <span class="what">Gerçek laboratuvarda saha testi ve <code>docs/TEST-PLANI.md</code> senaryolarının geçirilmesi. Ardından sınav / anket / yoklama modülleri, çoklu monitör, Linux’ta gerçek ekran yakalama.</span>
-      </li>
-    </ul>
-    <p style="margin:34px 0 0;font-size:15px;color:var(--text-2);max-width:66ch">
-      Okulunuzda denediyseniz sonucu bildirin — hangi Windows sürümü, kaç makine, ne çalıştı ne çalışmadı.
-      Saha geri bildirimi şu an projenin en çok ihtiyaç duyduğu şey.
-      <a href="https://github.com/selmancuzdan42/openclass/issues">Issue açın</a> ·
-      <a href="https://github.com/selmancuzdan42/openclass/blob/main/CONTRIBUTING.md">katkı rehberi</a>
-    </p>
+    <h2>Neden OpenClass?</h2>
+    <p class="sub">Okullar sınıf yönetimi için pahalı ve kapalı lisanslara mahkûm olmasın. OpenClass, gizli izleme olmadan, yalnızca sınıfın işini gören kontrolleri sunar: ekran paylaşımı her zaman öğrenciye görünürdür, klavye izleme şeffaftır. Yerel ağda çalıştığı için internet bağlantısına ve harici hizmetlere bağımlı değildir.</p>
   </div>
 </section>
 
 <footer>
   <div class="wrap">
-    <div>
-      <a class="brand" href="#" style="margin-bottom:12px">
-        <img src="assets/openclass-logo.svg" alt="">
-        OpenClass
-      </a>
-      <p class="lic" style="margin:0;font-size:13.5px;color:var(--text-3)">
-        Okul bilgisayar laboratuvarları için açık kaynak sınıf yönetim yazılımı.
-        GPL-3.0-or-later. Ticari bir ürünle bağlantısı yoktur; NetSupport School adı
-        yalnızca karşılaştırma için anılmıştır.
-      </p>
-    </div>
-    <div class="cols">
-      <div>
-        <h4>Proje</h4>
-        <ul>
-          <li><a href="https://github.com/selmancuzdan42/openclass">GitHub deposu</a></li>
-          <li><a href="https://github.com/selmancuzdan42/openclass/releases">Sürümler</a></li>
-          <li><a href="https://github.com/selmancuzdan42/openclass/blob/main/CHANGELOG.md">Değişiklik günlüğü</a></li>
-          <li><a href="https://github.com/selmancuzdan42/openclass/issues">Hata bildir</a></li>
-        </ul>
-      </div>
-      <div>
-        <h4>Belgeler</h4>
-        <ul>
-          <li><a href="https://github.com/selmancuzdan42/openclass/blob/main/docs/OGRETMEN-REHBERI.md">Öğretmen rehberi</a></li>
-          <li><a href="https://github.com/selmancuzdan42/openclass/blob/main/docs/OGRENCI-KURULUM.md">Öğrenci kurulumu</a></li>
-          <li><a href="https://github.com/selmancuzdan42/openclass/blob/main/docs/ARCHITECTURE.md">Mimari</a></li>
-          <li><a href="https://github.com/selmancuzdan42/openclass/blob/main/docs/TEST-PLANI.md">Test planı</a></li>
-        </ul>
-      </div>
-      <div>
-        <h4>Teknoloji</h4>
-        <ul style="color:var(--text-3)">
-          <li>Rust · Tauri v2</li>
-          <li>React 19 · TypeScript</li>
-          <li>Tokio · rustls · SQLite</li>
-          <li>Windows Graphics Capture</li>
-        </ul>
-      </div>
-    </div>
+    <span>Açık kaynak · GPL-3.0</span>
+    <a href="https://github.com/selmancuzdan42/openclass">GitHub</a>
+    <span class="ml">NetSupport School'a ücretsiz alternatif</span>
   </div>
 </footer>
 
-<script>
-(function () {
-  // Tema: kayıtlı tercih > işletim sistemi
-  var root = document.documentElement;
-  var saved = null;
-  try { saved = localStorage.getItem("openclass-theme"); } catch (e) {}
-  if (saved) {
-    root.setAttribute("data-theme", saved);
-  } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
-    root.setAttribute("data-theme", "dark");
-  }
-  document.getElementById("theme").addEventListener("click", function () {
-    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    root.setAttribute("data-theme", next);
-    try { localStorage.setItem("openclass-theme", next); } catch (e) {}
-  });
-
-  // Ekran görüntüsü sekmeleri
-  var tabs = Array.prototype.slice.call(document.querySelectorAll(".shot-tab"));
-  var img = document.getElementById("shot-img");
-  var cap = document.getElementById("shot-cap");
-  function select(tab) {
-    tabs.forEach(function (t) { t.setAttribute("aria-selected", String(t === tab)); });
-    img.src = tab.dataset.src;
-    img.alt = tab.textContent.trim();
-    cap.textContent = tab.dataset.cap;
-  }
-  tabs.forEach(function (tab, i) {
-    tab.addEventListener("click", function () { select(tab); });
-    tab.addEventListener("keydown", function (e) {
-      var d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-      if (!d) return;
-      e.preventDefault();
-      var n = tabs[(i + d + tabs.length) % tabs.length];
-      n.focus(); select(n);
-    });
-  });
-})();
-</script>
 </body>
 </html>

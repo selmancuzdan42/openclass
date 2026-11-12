@@ -1080,6 +1080,46 @@ pub async fn block_internet(
     Ok(sent)
 }
 
+// -------------------------------------------------------- klavye izleme
+
+/// Seçili öğrencinin klavyesinden tuş basımlarını izlemeye başlar.
+///
+/// Öğrenci bir klavye kancası kurar ve her tuş olayını `KeyEvent` olarak
+/// öğretmene akıtır; arayüz `key-event` olayını dinleyip canlı gösterir.
+/// İzleme öğrenci tarafında görünür olmalı — gizli keylogger değildir.
+#[tauri::command]
+pub async fn start_key_monitor(
+    state: State<'_, Arc<AppState>>,
+    device_id: String,
+) -> CmdResult<()> {
+    let id = parse_id(&device_id)?;
+    let Some(tx) = state.registry.sender(id) else {
+        return Err("Cihaz bağlı değil.".into());
+    };
+    tx.send(ServerMessage::StartKeyMonitor)
+        .await
+        .map_err(|_| "Cihazla bağlantı kapandı.".to_string())?;
+    tracing::info!(%id, "klavye izleme başlatıldı");
+    Ok(())
+}
+
+/// Seçili öğrencinin klavye izlemesini durdurur.
+#[tauri::command]
+pub async fn stop_key_monitor(
+    state: State<'_, Arc<AppState>>,
+    device_id: String,
+) -> CmdResult<()> {
+    let id = parse_id(&device_id)?;
+    let Some(tx) = state.registry.sender(id) else {
+        return Err("Cihaz bağlı değil.".into());
+    };
+    tx.send(ServerMessage::StopKeyMonitor)
+        .await
+        .map_err(|_| "Cihazla bağlantı kapandı.".to_string())?;
+    tracing::info!(%id, "klavye izleme durduruldu");
+    Ok(())
+}
+
 // -------------------------------------------------------- dosya gönderme
 
 /// Seçili öğrencilere dosya gönderir.

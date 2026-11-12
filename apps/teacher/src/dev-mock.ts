@@ -73,9 +73,17 @@ const audit: AuditEntry[] = devices.slice(0, 12).map((d, i) => ({
 }));
 
 const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
-  // Tauri olay eklentisi: sahte arka uç olay yaymaz, yalnızca kayıt numarası
-  // döndürür ki `listen()` çağrıları sessizce başarılı olsun.
-  "plugin:event|listen": () => Math.floor(Math.random() * 1e9),
+  // Tauri olay eklentisi: kayıt numarası döndürür ve handler'ı saklar ki
+  // klavye izleme simülasyonu `key-event` yayabilsin.
+  "plugin:event|listen": (args) => {
+    const event = args.event as string;
+    const handler = args.handler as (e: EventBridge) => void;
+    if (handler) {
+      if (!listeners.has(event)) listeners.set(event, new Set());
+      listeners.get(event)!.add(handler);
+    }
+    return Math.floor(Math.random() * 1e9);
+  },
   "plugin:event|unlisten": () => null,
   "plugin:event|emit": () => null,
   "plugin:event|emit_to": () => null,
@@ -105,6 +113,14 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   start_remote_control: () => null,
   stop_remote_control: () => null,
   send_remote_input: () => null,
+  start_key_monitor: () => {
+    startKeymock();
+    return null;
+  },
+  stop_key_monitor: () => {
+    stopKeymock();
+    return null;
+  },
   get_audit_log: () => audit,
   suggest_groups: () => [
     { prefix: "", deviceCount: 12, room: "Lab 1" },
@@ -139,6 +155,53 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
     return null;
   },
 };
+
+/** Tauri olay köprüsünün `listen` handler'ına verdiği nesne biçimi. */
+type EventBridge = { event: string; id: number; payload: unknown };
+
+/** `listen()` ile kaydolan olay handler'ları (olay adı → handler'lar). */
+const listeners = new Map<string, Set<(e: EventBridge) => void>>();
+
+/** Saklanan handler'lara bir olay yayar. */
+function dispatch(event: string, payload: unknown) {
+  const handlers = listeners.get(event);
+  if (!handlers) return;
+  for (const h of handlers) {
+    h({ event, id: 0, payload });
+  }
+}
+
+// --------------------------------------------- key-event simülasyonu
+// Sahte arka uç gerçek öğrenciden tuş alamaz; "Yakala" basılınca örnek bir
+// metni tuş tuş "yazar" ki arayüz Tauri olmadan da canlı akışı gösterebilsin.
+
+let keymockTimer: ReturnType<typeof setInterval> | null = null;
+let keymockPos = 0;
+let keymockTs = 0;
+const KEYMOCK_DEVICE = "00000000-0000-4000-8000-000000000002";
+const KEYMOCK_TEXT = "HOCAM BURADAYIM";
+
+function keymockStep() {
+  const ch = KEYMOCK_TEXT[keymockPos % KEYMOCK_TEXT.length] ?? " ";
+  const code = ch === " " ? 0x20 : ch.toUpperCase().charCodeAt(0);
+  const ts = keymockTs++;
+  dispatch("key-event", { deviceId: KEYMOCK_DEVICE, code, pressed: true, ts });
+  dispatch("key-event", { deviceId: KEYMOCK_DEVICE, code, pressed: false, ts: ts + 1 });
+  keymockPos += 1;
+}
+
+function startKeymock() {
+  if (keymockTimer) return;
+  keymockStep();
+  keymockTimer = setInterval(keymockStep, 350);
+}
+
+function stopKeymock() {
+  if (keymockTimer) {
+    clearInterval(keymockTimer);
+    keymockTimer = null;
+  }
+}
 
 /** Tauri köprüsünün yerine geçen en küçük sahte uygulama. */
 export function installDevMock() {

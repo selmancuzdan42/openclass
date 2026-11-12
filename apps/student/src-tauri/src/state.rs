@@ -98,7 +98,6 @@ pub struct RemoteControl {
     pub started_at: i64,
 }
 
-
 /// Ekran paylaşımının güncel durumu.
 ///
 /// Öğrenciye **her zaman** görünür biçimde gösterilir; gizli ekran paylaşımı

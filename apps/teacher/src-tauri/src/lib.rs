@@ -81,6 +81,8 @@ pub fn run() {
             commands::unfocus_devices,
             commands::send_notice,
             commands::block_internet,
+            commands::start_key_monitor,
+            commands::stop_key_monitor,
             commands::clear_help_request,
             commands::get_server_info,
             commands::update_settings,

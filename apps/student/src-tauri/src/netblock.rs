@@ -89,7 +89,9 @@ fn block_internet_windows() -> Result<bool, String> {
         "firewallpolicy",
         "blockinbound,blockoutbound",
     ])
-    .map_err(|_| "İnternet engellenemedi. Yönetici (admin) olarak çalıştırılmıyor olabilir.".to_string())?;
+    .map_err(|_| {
+        "İnternet engellenemedi. Yönetici (admin) olarak çalıştırılmıyor olabilir.".to_string()
+    })?;
 
     Ok(true)
 }
@@ -134,15 +136,15 @@ fn is_internet_blocked_windows() -> Result<bool, String> {
 #[cfg(windows)]
 fn run_netsh(args: &[&str]) -> Result<String, String> {
     match Command::new("netsh").args(args).output() {
+        Ok(Output { status, stdout, .. }) if status.success() => {
+            Ok(String::from_utf8_lossy(&stdout).into_owned())
+        }
         Ok(Output {
             status,
             stdout,
-            stderr: _,
+            stderr,
             ..
-        }) if status.success() => {
-            Ok(String::from_utf8_lossy(&stdout).into_owned())
-        }
-        Ok(Output { status, stdout, stderr, .. }) => {
+        }) => {
             let err = String::from_utf8_lossy(&stderr).into_owned();
             let out = String::from_utf8_lossy(&stdout).into_owned();
             Err(format!(

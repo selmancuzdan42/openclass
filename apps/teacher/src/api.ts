@@ -55,6 +55,11 @@ export const api = {
     call<number>("block_internet", { deviceIds, block }),
   clearHelpRequest: (deviceId: string) => call<void>("clear_help_request", { deviceId }),
 
+  startKeyMonitor: (deviceId: string) =>
+    call<void>("start_key_monitor", { deviceId }),
+  stopKeyMonitor: (deviceId: string) =>
+    call<void>("stop_key_monitor", { deviceId }),
+
   getServerInfo: () => call<ServerInfo>("get_server_info"),
   updateSettings: (settings: {
     teacherName?: string;

@@ -139,6 +139,8 @@ pub async fn run(state: Arc<AppState>, cancel: CancellationToken) {
         state.stop_remote_control();
         state.unlock_screen();
         state.stop_browsing();
+        // Tuş izlemesi oturuma bağlıdır: bağlantı kopunca kendiliğinden kapanır.
+        crate::keymon::stop();
 
         if cancel.is_cancelled() {
             return;
@@ -631,7 +633,6 @@ async fn handle_server_message(
 ) -> Result<()> {
     match msg {
         ServerMessage::StartScreenStream { stream_id, quality } => {
-
             match ScreenStream::start(stream_id, quality, &state.hostname) {
                 Ok(s) => {
                     tracing::info!(stream_id, backend = s.backend, "ekran yayını başladı");
@@ -965,6 +966,39 @@ async fn handle_server_message(
                         })
                         .await;
                 }
+            }
+        }
+
+        ServerMessage::StartKeyMonitor => {
+            if !cfg!(windows) {
+                tracing::warn!("klavye izleme bu platformda desteklenmiyor");
+                return Ok(());
+            }
+            // Zaten etkinse tekrar kurma: bir izleme zaten çalışıyor.
+            if crate::keymon::is_active() {
+                return Ok(());
+            }
+            let handler: crate::keymon::Handler = {
+                let tx = tx.clone();
+                Arc::new(move |ev: crate::keymon::KeyEvent| {
+                    // hook iş parçacığından çağrılır; `try_send` bloklamaz.
+                    let _ = tx.try_send(ClientMessage::KeyEvent {
+                        code: ev.code,
+                        pressed: ev.pressed,
+                        ts: ev.ts,
+                    });
+                })
+            };
+            match crate::keymon::start(handler) {
+                Ok(()) => tracing::info!("klavye izleme başladı"),
+                Err(err) => tracing::warn!(hata = %err.0, "klavye izleme başlatılamadı"),
+            }
+        }
+
+        ServerMessage::StopKeyMonitor => {
+            if crate::keymon::is_active() {
+                crate::keymon::stop();
+                tracing::info!("klavye izleme durduruldu");
             }
         }
 
