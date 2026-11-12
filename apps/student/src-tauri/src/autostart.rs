@@ -16,11 +16,13 @@
 
 use anyhow::Result;
 
-/// Kayıt defterindeki değerin adı.
+/// Görev Zamanlayıcı'daki görevin adı.
 ///
-/// Uygulamanın kendi adı kullanılır; başka bir şeymiş gibi gizlenmez.
+/// Oturum açılışında uygulamayı "en yüksek ayrıcalıkla" başlatır (onlogon +
+/// `/rl highest`). Böylece yönetici gerektiren komutlar UAC istemeden çalışır.
+/// Ad, başka bir şeymiş gibi gizlenmez; varlığı Görev Zamanlayıcı'da açıktır.
 #[cfg(windows)]
-const VALUE_NAME: &str = "OpenClass Student";
+const TASK_NAME: &str = "OpenClass Student";
 
 /// İkincil denetçinin (watchdog) kendini tanıdığı komut satırı bayrağı.
 const WATCHDOG_ARG: &str = "--openclass-watch";
@@ -81,93 +83,65 @@ pub fn notify_graceful_exit() {
 
 #[cfg(windows)]
 mod platform {
-    use super::{VALUE_NAME, WATCHDOG_ARG};
+    use super::{TASK_NAME, WATCHDOG_ARG};
     use anyhow::{bail, Result};
-    use windows_sys::Win32::Foundation::ERROR_SUCCESS;
-    use windows_sys::Win32::System::Registry::{
-        RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW, HKEY,
-        HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_SZ,
-    };
-
-    const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-
-    /// UTF-16, NUL ile sonlandırılmış dizge.
-    fn wide(text: &str) -> Vec<u16> {
-        text.encode_utf16().chain(std::iter::once(0)).collect()
-    }
-
-    /// `Run` anahtarını açar; çağıran kapatmakla yükümlüdür.
-    fn open(access: u32) -> Result<HKEY> {
-        let mut key: HKEY = std::ptr::null_mut();
-        let status = unsafe {
-            RegOpenKeyExW(
-                HKEY_CURRENT_USER,
-                wide(RUN_KEY).as_ptr(),
-                0,
-                access,
-                &mut key,
-            )
-        };
-        if status != ERROR_SUCCESS {
-            bail!("kayıt defteri anahtarı açılamadı (kod {status})");
-        }
-        Ok(key)
-    }
 
     pub fn is_enabled() -> bool {
-        let Ok(key) = open(KEY_READ) else {
-            return false;
-        };
-        let mut size: u32 = 0;
-        let status = unsafe {
-            RegQueryValueExW(
-                key,
-                wide(VALUE_NAME).as_ptr(),
-                std::ptr::null(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                &mut size,
-            )
-        };
-        unsafe { RegCloseKey(key) };
-        status == ERROR_SUCCESS
+        // Run anahtarı yerine Task Scheduler görevi kullanılır: oturum açılışında
+        // "en yüksek ayrıcalıkla" (onlogon + /rl highest) başlatılan bir görev
+        // UAC istemeden yönetici süreci başlatır. Run anahtarı bunu yapamaz.
+        let status = std::process::Command::new("schtasks")
+            .arg("/query")
+            .arg("/tn")
+            .arg(TASK_NAME)
+            .output();
+        matches!(status, Ok(out) if out.status.success())
     }
 
     pub fn set_enabled(enabled: bool) -> Result<()> {
-        let key = open(KEY_WRITE)?;
-        let name = wide(VALUE_NAME);
+        // Görevin yolu her seferinde güncel exe'ye işaret etsin.
+        let exe = std::env::current_exe()?;
+        let tr = format!("\"{}\"", exe.display()); // yolda boşluk olabilir
 
         let status = if enabled {
-            let exe = std::env::current_exe()?;
-            // Yol boşluk içerebilir; tırnak içine alınır.
-            let command = format!("\"{}\"", exe.display());
-            let value = wide(&command);
-            unsafe {
-                RegSetValueExW(
-                    key,
-                    name.as_ptr(),
-                    0,
-                    REG_SZ,
-                    value.as_ptr().cast::<u8>(),
-                    (value.len() * 2) as u32,
-                )
-            }
+            std::process::Command::new("schtasks")
+                .arg("/create")
+                .arg("/f")
+                .arg("/tn")
+                .arg(TASK_NAME)
+                .arg("/tr")
+                .arg(&tr)
+                .arg("/sc")
+                .arg("onlogon")
+                .arg("/rl")
+                .arg("highest")
+                .status()
         } else {
-            let status = unsafe { RegDeleteValueW(key, name.as_ptr()) };
-            // Zaten yoksa başarı sayılır.
-            if status != ERROR_SUCCESS && !is_enabled() {
-                ERROR_SUCCESS
-            } else {
-                status
-            }
+            // Görevi sil; hata yönetici eksikse/görev yoksa zararsız say.
+            std::process::Command::new("schtasks")
+                .arg("/delete")
+                .arg("/f")
+                .arg("/tn")
+                .arg(TASK_NAME)
+                .status()
         };
 
-        unsafe { RegCloseKey(key) };
-
-        if status != ERROR_SUCCESS {
-            bail!("kayıt defteri güncellenemedi (kod {status})");
+        match status {
+            Ok(st) if st.success() => {}
+            Ok(st) if !st.success() && !enabled && !is_enabled() => {
+                // Görev zaten yok/izinsiz: kaldırmanın "başarısızlığı" zararsız.
+            }
+            Ok(st) => bail!(
+                "schtasks komutu başarısız oldu (kod {:?}) — yönetici oturumda olmalı",
+                st.code()
+            ),
+            Err(err) => bail!("schtasks çalıştırılamadı: {err}"),
         }
-        tracing::info!(enabled, "otomatik başlatma ayarı değişti");
+
+        tracing::info!(
+            enabled,
+            "otomatik başlatma (Task Scheduler, yüksek ayrıcalık) ayarlandı"
+        );
         Ok(())
     }
 
