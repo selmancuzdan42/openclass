@@ -427,6 +427,14 @@ pub struct AppState {
     pub broadcast_fallback: RwLock<std::collections::HashSet<Uuid>>,
     /// Açık uzak dosya gezgini oturumu; aynı anda tek öğrenci gezilir.
     pub browse: RwLock<Option<crate::browse::BrowseSession>>,
+    /// Gezgin oturumu olmadan gelen toplu toplama indirmeleri ("Topla").
+    ///
+    /// "Dosya Al" bir `BrowseSession` açar ve indirmeyi oturumda taşır; toplu
+    /// "Topla" ise gezgin açmadan `BrowseFileStart/Chunk/End` gönderir. Bu
+    /// tablo, o akışın dosyayı yazıp kapatabilmesi için gelen `request_id`'yi
+    /// açık indirmeye eşler. Gezgin akışı de bu tabloyu kullanmaz — oturum
+    /// kendi download'ını taşır.
+    pub active_downloads: RwLock<HashMap<Uuid, crate::browse::Download>>,
     /// Öğretmenin seçtiği indirme klasörü.
     ///
     /// Oturum boyunca hatırlanır; her indirmede yeniden sorulmaz. Diske

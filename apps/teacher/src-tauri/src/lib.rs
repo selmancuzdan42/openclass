@@ -179,6 +179,7 @@ fn bootstrap() -> Result<Arc<AppState>> {
         transfers: RwLock::new(HashMap::new()),
         broadcast_fallback: RwLock::new(std::collections::HashSet::new()),
         browse: RwLock::new(None),
+        active_downloads: RwLock::new(HashMap::new()),
         download_root: RwLock::new(None),
         controlled_device: RwLock::new(None),
         broadcast: RwLock::new(None),

@@ -958,14 +958,32 @@ async fn handle_client_message(
             size,
             sha256,
         } => {
-            // Kök kilidi `await` üzerinden taşınmasın diye oturumdan kopyalanır.
+            // Toplu toplama ("Topla") gezgin oturumu açmaz: öğrenci
+            // `BrowseFileStart`'ı doğrudan gönderir. Bu durumda `state.browse`
+            // boştur ve indirme, genel indirme köküne (download_root) yazılır.
+            // Gezgin akışındaysa (Dosya Al) oturumun hostname + hedefi kullanılır.
             let (hostname, target_dir) = {
                 let guard = state.browse.read();
                 match guard.as_ref() {
                     Some(s) if s.device_id == device_id => {
                         (s.hostname.clone(), s.target_dir.clone())
                     }
-                    _ => return,
+                    _ => {
+                        // Topla: gezgin oturumu yok. Hostname'i cihaz
+                        // kaydından çöz, hedef yok → genel indirme kökü.
+                        drop(guard);
+                        let hostname = state
+                            .registry
+                            .build_views(&state.db)
+                            .ok()
+                            .and_then(|v| {
+                                v.into_iter()
+                                    .find(|d| d.device_id == device_id)
+                                    .map(|d| d.hostname)
+                            })
+                            .unwrap_or_else(|| device_id.to_string());
+                        (hostname, None)
+                    }
                 }
             };
 
@@ -981,23 +999,30 @@ async fn handle_client_message(
                 kok.as_deref(),
             ) {
                 Ok(download) => {
+                    // Gezgin oturumu açıksa indirme oturumda izlenir (Dosya Al);
+                    // açık değilse toplu toplamadır (Topla) → aktif indirme
+                    // tablosunda izlenir. İkisi aynı akışı (BrowseChunk/End)
+                    // ayrı yerlerden besler.
                     let mut guard = state.browse.write();
-                    let Some(session) = guard.as_mut() else {
-                        return;
-                    };
-                    tracing::info!(%device_id, %request_id, %name, size, "indirme başladı");
-                    session.download_view = Some(crate::browse::DownloadView {
-                        name: download.name.clone(),
-                        size,
-                        received: 0,
-                        finished: false,
-                        ok: false,
-                        detail: String::new(),
-                    });
-                    session.download = Some(download);
-                    let view = crate::browse::BrowseView::from(&*session);
-                    drop(guard);
-                    state.emit("browse-changed", Some(view));
+                    if let Some(session) = guard.as_mut() {
+                        tracing::info!(%device_id, %request_id, %name, size, "indirme başladı");
+                        session.download_view = Some(crate::browse::DownloadView {
+                            name: download.name.clone(),
+                            size,
+                            received: 0,
+                            finished: false,
+                            ok: false,
+                            detail: String::new(),
+                        });
+                        session.download = Some(download);
+                        let view = crate::browse::BrowseView::from(&*session);
+                        drop(guard);
+                        state.emit("browse-changed", Some(view));
+                    } else {
+                        drop(guard);
+                        state.active_downloads.write().insert(request_id, download);
+                        tracing::info!(%device_id, %request_id, %name, size, "toplu toplama indirmesi başladı");
+                    }
                 }
                 Err(err) => {
                     tracing::error!(%err, "indirme hazırlanamadı");
@@ -1017,90 +1042,116 @@ async fn handle_client_message(
             seq,
             data,
         } => {
+            // Önce gezgin oturumu (Dosya Al), yoksa toplu toplama tablosu (Topla).
             let mut guard = state.browse.write();
-            let Some(session) = guard.as_mut() else {
-                return;
-            };
-            if session.device_id != device_id {
-                return;
-            }
-            let Some(download) = session.download.as_mut() else {
-                return;
-            };
-            if download.request_id != request_id {
-                return;
-            }
-
-            if let Err(err) = download.write_chunk(seq, &data) {
-                tracing::error!(%err, "indirme parçası yazılamadı");
-                let detail = err.to_string();
-                if let Some(aborted) = session.download.take() {
-                    aborted.abort();
+            if let Some(session) = guard.as_mut() {
+                if session.device_id == device_id
+                    && session.download.as_ref().map(|d| d.request_id) == Some(request_id)
+                {
+                    let Some(download) = session.download.as_mut() else {
+                        return;
+                    };
+                    if let Err(err) = download.write_chunk(seq, &data) {
+                        tracing::error!(%err, "indirme parçası yazılamadı");
+                        let detail = err.to_string();
+                        if let Some(aborted) = session.download.take() {
+                            aborted.abort();
+                        }
+                        session.download_view = Some(crate::browse::DownloadView {
+                            name: String::new(),
+                            size: 0,
+                            received: 0,
+                            finished: true,
+                            ok: false,
+                            detail,
+                        });
+                    } else {
+                        let received = download.received;
+                        if let Some(view) = session.download_view.as_mut() {
+                            view.received = received;
+                        }
+                    }
+                    let view = crate::browse::BrowseView::from(&*session);
+                    drop(guard);
+                    state.emit("browse-changed", Some(view));
+                    return;
                 }
-                session.download_view = Some(crate::browse::DownloadView {
-                    name: String::new(),
-                    size: 0,
-                    received: 0,
-                    finished: true,
-                    ok: false,
-                    detail,
-                });
-            } else {
-                let received = download.received;
-                if let Some(view) = session.download_view.as_mut() {
-                    view.received = received;
-                }
             }
-            let view = crate::browse::BrowseView::from(&*session);
             drop(guard);
-            state.emit("browse-changed", Some(view));
+
+            // Topla: gezgin oturumu yok → aktif indirme tablosu.
+            let mut downloads = state.active_downloads.write();
+            let Some(download) = downloads.get_mut(&request_id) else {
+                return;
+            };
+            if let Err(err) = download.write_chunk(seq, &data) {
+                tracing::error!(%err, "toplu toplama parçası yazılamadı");
+                downloads.remove(&request_id);
+            }
         }
 
         ClientMessage::BrowseFileEnd { request_id } => {
+            // Önce gezgin oturumu (Dosya Al), yoksa toplu toplama tablosu (Topla).
             let mut guard = state.browse.write();
-            let Some(session) = guard.as_mut() else {
-                return;
-            };
-            if session.device_id != device_id {
-                return;
-            }
-            let Some(download) = session.download.take() else {
-                return;
-            };
-            if download.request_id != request_id {
-                download.abort();
-                return;
-            }
+            if let Some(session) = guard.as_mut() {
+                if session.device_id == device_id
+                    && session.download.as_ref().map(|d| d.request_id) == Some(request_id)
+                {
+                    let Some(download) = session.download.take() else {
+                        return;
+                    };
 
-            let name = download.name.clone();
-            let size = download.size;
-            let (ok, detail) = match download.finish() {
-                Ok(path) => {
-                    tracing::info!(%device_id, yol = %path.display(), "dosya indirildi");
-                    (true, path.display().to_string())
-                }
-                Err(err) => {
-                    tracing::error!(%device_id, %err, "indirme doğrulanamadı");
-                    (false, err.to_string())
-                }
-            };
+                    let name = download.name.clone();
+                    let size = download.size;
+                    let (ok, detail) = match download.finish() {
+                        Ok(path) => {
+                            tracing::info!(%device_id, yol = %path.display(), "dosya indirildi");
+                            (true, path.display().to_string())
+                        }
+                        Err(err) => {
+                            tracing::error!(%device_id, %err, "indirme doğrulanamadı");
+                            (false, err.to_string())
+                        }
+                    };
 
-            session.download_view = Some(crate::browse::DownloadView {
-                name: name.clone(),
-                size,
-                received: size,
-                finished: true,
-                ok,
-                detail: detail.clone(),
-            });
-            let view = crate::browse::BrowseView::from(&*session);
+                    session.download_view = Some(crate::browse::DownloadView {
+                        name: name.clone(),
+                        size,
+                        received: size,
+                        finished: true,
+                        ok,
+                        detail: detail.clone(),
+                    });
+                    let view = crate::browse::BrowseView::from(&*session);
+                    drop(guard);
+
+                    // Her indirme denetim kaydına yazılır.
+                    state
+                        .db
+                        .audit(AuditKind::FileDownloaded, Some(device_id), Some(&name));
+                    state.emit("browse-changed", Some(view));
+                    return;
+                }
+            }
             drop(guard);
 
-            // Her indirme denetim kaydına yazılır.
-            state
-                .db
-                .audit(AuditKind::FileDownloaded, Some(device_id), Some(&name));
-            state.emit("browse-changed", Some(view));
+            // Topla: gezgin oturumu yok → aktif indirme tablosu.
+            let mut downloads = state.active_downloads.write();
+            let Some(download) = downloads.remove(&request_id) else {
+                return;
+            };
+            let name = download.name.clone();
+            match download.finish() {
+                Ok(path) => {
+                    tracing::info!(%device_id, yol = %path.display(), "toplu toplama dosyası indirildi");
+                    state
+                        .db
+                        .audit(AuditKind::FileDownloaded, Some(device_id), Some(&name));
+                }
+                Err(err) => {
+                    tracing::error!(%device_id, %err, "toplu toplama dosyası doğrulanamadı");
+                }
+            }
         }
 
         ClientMessage::MulticastUnavailable { broadcast_id } => {
