@@ -73,7 +73,15 @@ nav a:hover { color: var(--ink); text-decoration: none; }
 @media (max-width: 560px) { nav { gap: 14px; } nav a.hide-sm { display: none; } }
 
 /* Hero */
-.hero { padding: 80px 0 56px; text-align: center; }
+.hero { padding: 84px 0 48px; text-align: center; position: relative; overflow: hidden; }
+.hero::before {
+  content: ""; position: absolute; inset: -40% -25% auto;
+  height: 460px; background:
+    radial-gradient(600px circle at 20% 30%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 60%),
+    radial-gradient(700px circle at 80% 20%, color-mix(in srgb, var(--accent-2) 12%, transparent), transparent 55%);
+  filter: blur(6px); pointer-events: none;
+}
+.hero .wrap { position: relative; }
 .eyebrow { font: 600 12px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--accent-2); margin-bottom: 22px; }
 h1 { font-size: clamp(34px, 5.6vw, 50px); line-height: 1.08; letter-spacing: -.03em; font-weight: 740; max-width: 20ch; margin: 0 auto 18px; }
 .lede { font-size: 18px; color: var(--ink-2); max-width: 56ch; margin: 0 auto 30px; }
@@ -88,22 +96,75 @@ h1 { font-size: clamp(34px, 5.6vw, 50px); line-height: 1.08; letter-spacing: -.0
 .btn-ghost { background: var(--surface); color: var(--ink); border: 1px solid var(--stroke); }
 .btn-ghost:hover { background: var(--accent-soft); text-decoration: none; }
 
+/* Hero giriş animasyonu (fade-up, sıralı — JS tetikli, garantili) */
+.hero .eyebrow, .hero h1, .hero .lede, .hero .cta, .hero .badges {
+  opacity: 0; transform: translateY(16px);
+  transition: opacity .7s cubic-bezier(.22,1,.36,1), transform .7s cubic-bezier(.22,1,.36,1);
+  will-change: opacity, transform;
+}
+.hero.in .eyebrow { opacity: 1; transform: none; transition-delay: .05s; }
+.hero.in h1 { opacity: 1; transform: none; transition-delay: .12s; }
+.hero.in .lede { opacity: 1; transform: none; transition-delay: .22s; }
+.hero.in .cta { opacity: 1; transform: none; transition-delay: .34s; }
+.hero.in .badges { opacity: 1; transform: none; transition-delay: .46s; }
+@media (prefers-reduced-motion: reduce) {
+  .hero .eyebrow, .hero h1, .hero .lede, .hero .cta, .hero .badges { opacity: 1; transform: none; transition: none; }
+}
+
 /* Rozetler */
-.badges { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 34px 0 0; }
+.badges { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 30px 0 0; }
 .badge {
   display: inline-flex; align-items: center; gap: 7px;
   border: 1px solid var(--stroke); background: var(--surface);
   border-radius: 99px; padding: 8px 14px; font-size: 13px; color: var(--ink-2);
 }
-.badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: pulse 2.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
-/* Ekran görüntüsü */
-.shot { padding: 8px 0 6px; }
-.shot img {
-  border-radius: var(--r); border: 1px solid var(--stroke);
-  box-shadow: 0 24px 60px -24px rgba(0,0,0,.6);
-  margin: 0 auto;
+/* Ekran görüntüsü — pencere çerçevesi */
+.shot { padding: 26px 0 10px; }
+.browser {
+  position: relative; max-width: min(100%, 980px); margin: 0 auto;
+  border: 1px solid var(--stroke); border-radius: 14px; overflow: hidden;
+  background: var(--surface-2);
+  box-shadow: 0 30px 70px -28px rgba(0,0,0,.75), 0 0 0 1px color-mix(in srgb, var(--stroke) 40%, transparent);
+  transition: transform .3s ease, box-shadow .3s ease;
 }
+.browser:hover { transform: translateY(-3px); box-shadow: 0 36px 80px -28px rgba(0,0,0,.8); }
+.browser .bar {
+  display: flex; align-items: center; gap: 8px; height: 34px;
+  padding: 0 14px; border-bottom: 1px solid var(--stroke); background: var(--surface);
+}
+.browser .bar i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.browser .bar i:nth-child(1) { background: #ff5f57; }
+.browser .bar i:nth-child(2) { background: #febc2e; }
+.browser .bar i:nth-child(3) { background: #28c840; }
+.browser .bar .addr { margin-left: 10px; flex: 1; font: 500 11px/1 var(--sans); color: var(--ink-3); background: var(--surface-2); border: 1px solid var(--stroke); border-radius: 6px; padding: 5px 10px; text-align: left; white-space: nowrap; overflow: hidden; }
+.browser img { display: block; width: 100%; height: auto; }
+
+/* Pencere üstüne binen canlı rozetler */
+.floats { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.float {
+  position: absolute; display: flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; color: var(--ink);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  border: 1px solid var(--stroke); border-radius: 8px; padding: 6px 10px;
+  box-shadow: 0 10px 26px -12px rgba(0,0,0,.6);
+  backdrop-filter: blur(6px);
+  opacity: 0; transform: translateY(8px) scale(.96);
+  transition: opacity .5s cubic-bezier(.22,1,.36,1), transform .5s cubic-bezier(.22,1,.36,1);
+}
+.floats.shown .float { opacity: 1; transform: none; }
+.floats.shown .float.b1 { transition-delay: .1s; }
+.floats.shown .float.b2 { transition-delay: .25s; }
+.floats.shown .float.b3 { transition-delay: .4s; }
+.float .chk { color: var(--ok); font-size: 13px; }
+.float.b1 { top: 13%; left: 7%; }
+.float.b2 { top: 46%; right: 6%; }
+.float.b3 { bottom: 14%; left: 9%; }
+@media (prefers-reduced-motion: reduce) { .float { opacity: 1; transform: none; transition: none; } }
+@media (max-width: 640px) { .floats { display: none; } }
+
 
 /* Bölüm */
 section.block { padding: 70px 0; border-bottom: 1px solid var(--stroke); }
@@ -201,7 +262,18 @@ footer .ml { margin-left: auto; }
 
 <div class="shot">
   <div class="wrap">
-    <img src="assets/ogretmen-konsolu-acik.png" alt="Öğretmen konsolu — öğrenci ekranları tek pencerede">
+    <div class="browser">
+      <div class="bar">
+        <i></i><i></i><i></i>
+        <span class="addr">openclass.lab — öğretmen konsolu</span>
+      </div>
+      <img src="assets/ogretmen-konsolu-acik.png" alt="Öğretmen konsolu — öğrenci ekranları tek pencerede">
+      <div class="floats">
+        <span class="float b1"><span class="chk">✓</span> İnternet engellendi</span>
+        <span class="float b2"><span class="chk">✓</span> Ekran kilitlendi</span>
+        <span class="float b3"><span class="chk">✓</span> Klavye izleniyor</span>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -351,6 +423,25 @@ footer .ml { margin-left: auto; }
   window.addEventListener("scroll", onScroll, { passive: true });
   window.addEventListener("resize", onScroll);
   revealOnScroll(); // ilk ekrandaki öğeleri anında getir
+})();
+
+// Hero giriş animasyonu: sayfa yüklendikten kısa süre sonra .in ver → öğeler
+// sırayla belirir. setTimeout kullanılır çünkü bazı ortamlarda rAF tetiklenmez.
+(function () {
+  var hero = document.querySelector(".hero");
+  if (!hero) return;
+  var t = function () { hero.classList.add("in"); };
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) { t(); return; }
+  setTimeout(t, 200);
+})();
+
+// Pencere üstü canlı rozetler: benzer şekilde .shown verilince görünürler.
+(function () {
+  var floats = document.querySelector(".floats");
+  if (!floats) return;
+  var t = function () { floats.classList.add("shown"); };
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) { t(); return; }
+  setTimeout(t, 900);
 })();
 </script>
 
