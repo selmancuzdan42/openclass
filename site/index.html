@@ -197,6 +197,9 @@ section.block:last-of-type { border-bottom: none; }
 
 /* İndir */
 .dl { background: var(--accent-soft); border: 1px solid var(--stroke); border-radius: 16px; padding: 40px 28px; text-align: center; }
+.dl-grid { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-top: 4px; }
+.dl-grid .btn { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 24px; min-width: 170px; }
+.dl-grid .btn small { font-size: 11.5px; opacity: .8; font-weight: 500; }
 .dl h3 { font-size: 22px; margin-bottom: 10px; }
 .dl p { color: var(--ink-2); max-width: 52ch; margin: 0 auto 22px; }
 .dl .ver { font: 500 13px/1 var(--sans); color: var(--ink-2); border: 1px solid var(--stroke); border-radius: 99px; padding: 6px 12px; display: inline-block; margin-bottom: 18px; }
@@ -336,10 +339,17 @@ footer .ml { margin-left: auto; }
 <section class="block" id="indir">
   <div class="wrap">
     <div class="dl">
-      <span class="ver">v0.3.0 — en son sürüm</span>
+      <span class="ver">Windows — en son sürüm</span>
       <h3>Ücretsiz ve açık kaynak</h3>
-      <p>Windows için hazır kurulumsuz programlar. Sunucu kurulumu, hesap ve abonelik yok.</p>
-      <a class="btn btn-primary" href="https://github.com/selmancuzdan42/openclass/releases">GitHub'dan indir</a>
+      <p>Windows için hazır kurulumsuz programlar. Sunucu kurulumu, hesap ve abonelik yok.<br>Öğretmen ve öğrenci programlarını ayrı ayrı indirin:</p>
+      <div class="dl-grid">
+        <a class="btn btn-primary" href="https://github.com/selmancuzdan42/openclass/releases/latest/download/OpenClass-Teacher.exe">
+          <strong>Öğretmen İndir</strong><small>Ekranı görür, yönetir</small>
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/selmancuzdan42/openclass/releases/latest/download/OpenClass-Student.exe">
+          <strong>Öğrenci İndir</strong><small>Bilgisayarlara kurulur</small>
+        </a>
+      </div>
     </div>
   </div>
 </section>
