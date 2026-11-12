@@ -44,7 +44,7 @@ import {
   PairingDialog,
   SettingsDialog,
 } from "./dialogs";
-import { BrowserDialog } from "./BrowserDialog";
+import { open as openFileDialog, open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { TransfersDialog } from "./TransfersDialog";
 import { GroupBar, type GroupTab } from "./GroupBar";
 import { DetailsTable, ThumbnailGrid } from "./ListView";
@@ -67,7 +67,6 @@ import type {
   BroadcastInfo,
   DeviceGroup,
   DeviceView,
-  FileDestination,
   FrameEvent,
   HelpEvent,
   PairingInfo,
@@ -111,7 +110,6 @@ function Console() {
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
   const [transfersOpen, setTransfersOpen] = useState(false);
-  const [browserOpen, setBrowserOpen] = useState(false);
 
   // Seçim ve filtre
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
@@ -313,12 +311,14 @@ function Console() {
   }
 
   /**
-   * Gönderim için tek gezgin penceresini açar.
+   * Gerçek Windows iletişim kutularıyla dosya gönderir.
    *
-   * Hedef klasör ve yerel dosya seçimi artık pencerenin içinde yapılır
-   * (NetSupport tarzı tek adım). Yalnızca ilk hedefin gezgini açılır; taşınan
-   * değer köke göre göreli olduğundan aynı hesap tüm alıcılarda kendi
-   * kullanıcı klasörünün altına denk gelir.
+   * İki kutu art arda açılır — ikisi de işletim sisteminin kendi gezginidir
+   * (Tauri `plugin-dialog` native pencereyi açar):
+   *   1. Gönderilecek yerel dosya seçilir.
+   *   2. Hedef klasör seçilir; seçilen yol öğrencinin kullanıcı klasöründeki
+   *      karşılığına göreli olarak çözülür (Belgeler/Masaüstü/İndirilenler).
+   * Seçim iptal edilirse gönderim başlamaz. Sonuç Gönderimler listesinde izlenir.
    */
   async function pickAndSendFile() {
     const hedefler = actionTargets;
@@ -326,23 +326,41 @@ function Console() {
       show("error", "Dosya gönderilecek bağlı cihaz yok.");
       return;
     }
-    const ilk = hedefler[0];
-    if (!ilk) return;
-    const ok = await guard(api.openBrowser(ilk.deviceId));
-    if (ok === undefined) return;
-    setBrowserOpen(true);
-  }
 
-  /** Gezgin içinde gönderim başladığında pencereden çıkıp durumu gösterir. */
-  async function handleSendToFolder(
-    _destination: FileDestination,
-    _subpath: string | null,
-    shown: string,
-  ) {
-    await api.closeBrowser().catch(() => {});
-    setBrowserOpen(false);
-    show("success", `Dosya ${actionTargets.length} cihaza gönderiliyor: ${shown}`);
-    setTransfersOpen(true);
+    // 1) Gönderilecek dosya (işletim sisteminin native gezgini).
+    const picked = await openFileDialog({
+      multiple: false,
+      directory: false,
+      title: "Öğrencilere gönderilecek dosyayı seçin",
+    });
+    if (typeof picked !== "string") return;
+
+    // 2) Hedef klasör (native gezgin). Öğrencinin kullanıcı klasörüne
+    //    göreli çözülür; Öğretmen kendi makinesinde bir klasör seçer.
+    const hedef = await openFolderDialog({
+      directory: true,
+      multiple: false,
+      title: "Öğrencinin hangi klasörüne göndersin?",
+    });
+    if (typeof hedef !== "string") return;
+
+    const resolved = resolveDestination(hedef);
+    if (!resolved) {
+      show(
+        "error",
+        "Bu klasör öğrenciyle paylaşılan konumlardan değil. Belgeler, Masaüstü veya İndirilenler içinde bir klasör seçin.",
+      );
+      return;
+    }
+
+    const ids = hedefler.map((d) => d.deviceId);
+    const ok = await guard(
+      api.sendFile(ids, picked, resolved.destination, resolved.subpath),
+    );
+    if (ok !== undefined) {
+      show("success", `Dosya ${ids.length} cihaza gönderilecek: ${resolved.shown}`);
+      setTransfersOpen(true);
+    }
   }
 
   async function toggleControl() {
@@ -451,17 +469,8 @@ function Console() {
               {
                 label: "Dosya Al",
                 icon: <FileDown size={18} />,
-                disabled: selectedDevices.length !== 1,
-                title:
-                  selectedDevices.length !== 1
-                    ? "Tek bir cihaz seçin"
-                    : "Öğrencinin dosyalarını görüntüle ve indir (yalnızca okuma)",
-                onClick: async () => {
-                  const device = selectedDevices[0];
-                  if (!device) return;
-                  const ok = await guard(api.openBrowser(device.deviceId));
-                  if (ok !== undefined) setBrowserOpen(true);
-                },
+                title: "Alınan dosyaların klasörünü Windows Gezgini'nde aç",
+                onClick: () => void guard(api.openDownloadsDir()),
               },
               {
                 label: "Gönderimler",
@@ -682,13 +691,9 @@ function Console() {
           onSelect: () => void guard(api.unlockDevices([menuDevice.deviceId])),
         },
         {
-          label: "Dosyalarını al",
+          label: "Alınan klasörü aç",
           icon: <FileDown size={13} />,
-          disabled: !menuDevice.online,
-          onSelect: async () => {
-            const ok = await guard(api.openBrowser(menuDevice.deviceId));
-            if (ok !== undefined) setBrowserOpen(true);
-          },
+          onSelect: () => void guard(api.openDownloadsDir()),
         },
         null,
         {
@@ -963,16 +968,6 @@ function Console() {
         }}
       />
 
-      <BrowserDialog
-        open={browserOpen}
-        targetIds={actionTargets.map((d) => d.deviceId)}
-        onSendToFolder={handleSendToFolder}
-        onClose={() => {
-          setBrowserOpen(false);
-          void api.closeBrowser().catch(() => {});
-        }}
-      />
-
       <TransfersDialog
         open={transfersOpen}
         devices={devices}
@@ -1241,4 +1236,65 @@ function AuditView() {
       )}
     </Panel>
   );
+}
+
+/**
+ * Native gezginden seçilen bir Windows yolunu öğrenciyle paylaşılan bir
+ * hedefe çözer.
+ *
+ * Öğretmen kendi makinesinde `Belgeler → Ders Notları` gibi bir klasör
+ * seçer. Seçilen yol paylaşılan köklerden birine (Belgeler / Masaüstü /
+ * İndirilenler) denk geliyorsa kalan göreli yol öğrencinin kullanıcı
+ * klasöründeki aynı konuma gönderilir. Yol paylaşılan köklerden hiçbirinin
+ * altında değilse `null` döner.
+ *
+ * Klasör adları hem Türkçe hem İngilizce olabilir (`Belgeler`/`Documents`,
+ * `Masaüstü`/`Desktop`, `İndirilenler`/`Downloads`).
+ */
+function resolveDestination(
+  path: string,
+): { destination: "documents" | "desktop" | "downloads"; subpath: string | null; shown: string } | null {
+  const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
+  if (parts.length === 0) return null;
+
+  const last = parts[parts.length - 1]!.toLowerCase();
+  const parent = parts.length >= 2 ? parts[parts.length - 2]!.toLowerCase() : "";
+
+  // Kök klasörün kendisi mi seçildi?
+  if (destOf(last)) {
+    return {
+      destination: destOf(last)!,
+      subpath: null,
+      shown: destLabel(destOf(last)!),
+    };
+  }
+  // Kök klasörün hemen içindeki bir alt klasör mü?
+  if (destOf(parent)) {
+    return {
+      destination: destOf(parent)!,
+      subpath: last,
+      shown: `${destLabel(destOf(parent)!)} → ${parts[parts.length - 1]}`,
+    };
+  }
+  return null;
+}
+
+function destOf(s: string): "documents" | "desktop" | "downloads" | null {
+  switch (s) {
+    case "belgeler":
+    case "documents":
+      return "documents";
+    case "masaüstü":
+    case "desktop":
+      return "desktop";
+    case "indirilenler":
+    case "downloads":
+      return "downloads";
+    default:
+      return null;
+  }
+}
+
+function destLabel(d: "documents" | "desktop" | "downloads"): string {
+  return d === "documents" ? "Belgeler" : d === "desktop" ? "Masaüstü" : "İndirilenler";
 }
