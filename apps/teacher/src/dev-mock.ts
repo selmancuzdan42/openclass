@@ -103,6 +103,8 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   get_browse: () => null,
   open_downloads_dir: () => null,
   send_file: () => "00000000-0000-0000-0000-000000000000",
+  collect_files: () => 1,
+  shutdown_device: () => null,
   get_download_root: () => "C:\\Users\\Hoca\\Belgeler\\OpenClass\\Toplanan",
   set_download_root: (args: Record<string, unknown>) =>
     (args.path as string | null) ?? "C:\\Users\\Hoca\\Belgeler\\OpenClass\\Toplanan",

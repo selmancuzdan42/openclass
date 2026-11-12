@@ -4,7 +4,14 @@ import { RefreshCw } from "lucide-react";
 
 import { api, AUDIT_LABELS, formatTime } from "./api";
 import { ScreenCanvas } from "@openclass/screen-view";
-import { Lock, MousePointerBan, MousePointerClick, ScreenShare } from "lucide-react";
+import {
+  Lock,
+  MousePointerBan,
+  MousePointerClick,
+  ScreenShare,
+  FileArchive,
+  Power,
+} from "lucide-react";
 
 import { RemoteControlSurface } from "./RemoteControlSurface";
 import { Button, Empty, Field, Modal, TextInput, useToast } from "./ui";
@@ -12,6 +19,7 @@ import type {
   AuditEntry,
   DeviceGroup,
   DeviceView,
+  FileDestination,
   GroupSuggestion,
   PairingInfo,
   ServerInfo,
@@ -943,6 +951,193 @@ export function RoomPickerDialog({
           Ölçüt yazdığınız anda uygulanır; bilgisayarlar açıldıkça listeye
           düşerler. Henüz hiçbir makine açılmamışken de ad girebilirsiniz.
           Seçim Ayarlar'dan değiştirilebilir.
+        </p>
+      </div>
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------------ toplama
+
+/** Dosya toplama için İndirilenler gibi köklerin Türkçe etiketi. */
+const ROOT_LABELS: Record<FileDestination, string> = {
+  desktop: "Masaüstü",
+  documents: "Belgeler",
+  downloads: "İndirilenler",
+};
+
+/** Tek bir kökün seçileceği, sırayı koruyan sabit liste. */
+const ROOT_OPTIONS: FileDestination[] = ["desktop", "documents", "downloads"];
+
+/**
+ * Seçili öğrencilerin bilgisayarından dosya toplama isteği.
+ *
+ * Öğretmen bir kök (varsayılan Masaüstü) ve bir desen verir; onayda her
+ * hedefe `CollectRequest` gönderilir. `deleteSource` işaretliyse gönderim
+ * doğrulandığında kaynak dosya öğrenciden silinir.
+ */
+export function CollectDialog({
+  open,
+  targets,
+  onClose,
+  onCollected,
+}: {
+  open: boolean;
+  targets: DeviceView[];
+  onClose: () => void;
+  onCollected: () => void;
+}) {
+  const { guard, show } = useToast();
+  const [root, setRoot] = useState<FileDestination>("desktop");
+  const [pattern, setPattern] = useState("");
+  const [deleteSource, setDeleteSource] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setRoot("desktop");
+    setPattern("sınav.zip");
+    setDeleteSource(false);
+  }, [open]);
+
+  async function collect() {
+    const p = pattern.trim();
+    if (!p) {
+      show("error", "Desen boş olamaz.");
+      return;
+    }
+    setBusy(true);
+    const sent = await guard(
+      api.collectFiles(
+        targets.map((d) => d.deviceId),
+        p,
+        root,
+        deleteSource,
+      ),
+    );
+    setBusy(false);
+    if (sent !== undefined) {
+      show("success", `${sent} cihaza toplama isteği gönderildi.`);
+      onCollected();
+      onClose();
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      title="Dosya topla"
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>Vazgeç</Button>
+          <Button
+            tone="accent"
+            onClick={collect}
+            disabled={busy || targets.length === 0}
+          >
+            <FileArchive size={13} /> {busy ? "Gönderiliyor…" : "Topla"}
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-3 text-[11px] text-[var(--color-text-2)]">
+        Hedef: {targets.length === 0 ? "bağlı cihaz yok" : targets.map((d) => d.hostname).join(", ")}
+      </p>
+      <div className="space-y-3">
+        <Field
+          label="Tarancak kök"
+          hint="Öğrencinin kendi kullanıcı klasöründeki konum."
+        >
+          <select
+            value={root}
+            onChange={(e) => setRoot(e.target.value as FileDestination)}
+            className="h-[26px] w-full rounded border border-[var(--color-stroke-strong)]
+              bg-[var(--color-surface)] px-2 text-[12px]
+              focus:border-[var(--color-accent)] focus:outline-none"
+          >
+            {ROOT_OPTIONS.map((r) => (
+              <option key={r} value={r}>
+                {ROOT_LABELS[r]}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field
+          label="Desen"
+          hint="Tam dosya adı (sınav.zip) veya joker (kök altındaki *.zip dosyaları)."
+        >
+          <TextInput
+            className="w-full font-mono"
+            value={pattern}
+            onChange={(e) => setPattern(e.target.value)}
+            placeholder="sınav.zip veya *.zip"
+          />
+        </Field>
+        <label className="flex cursor-pointer items-start gap-2 rounded border border-[var(--color-stroke-strong)]
+          p-2.5">
+          <input
+            type="checkbox"
+            checked={deleteSource}
+            onChange={(e) => setDeleteSource(e.target.checked)}
+            className="mt-0.5 accent-[var(--color-danger)]"
+          />
+          <span className="min-w-0">
+            <span className="block text-[12px] font-medium">
+              Toplandıktan sonra kaynaktan sil
+            </span>
+            <span className="block text-[11px] leading-relaxed text-[var(--color-text-3)]">
+              Gönderim doğrulandığında dosya öğrencinin bilgisayarından kalıcı
+              olarak kaldırılır. Geri alınamaz.
+            </span>
+          </span>
+        </label>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------- uzaktan kapatma
+
+/** Tek bir öğrencinin bilgisayarını kapatma onayı. */
+export function ShutdownDialog({
+  open,
+  device,
+  onClose,
+  onShutdown,
+}: {
+  open: boolean;
+  device: DeviceView | null;
+  onClose: () => void;
+  onShutdown: (deviceId: string) => void;
+}) {
+  return (
+    <Modal
+      open={open && device !== null}
+      title={device ? `${device.hostname} kapatılacak` : ""}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>Vazgeç</Button>
+          <Button
+            tone="danger"
+            disabled={!device}
+            onClick={() => device && onShutdown(device.deviceId)}
+          >
+            <Power size={13} /> Bilgisayarı Kapat
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3 p-3">
+        <p className="rounded bg-[var(--color-warn)]/10 p-2.5 text-[12px] leading-relaxed
+          text-[var(--color-text)]">
+          <strong>{device?.hostname ?? "Bu cihaz"}</strong> bilgisayarı kapatılacak.
+          Komut geri alınamaz; öğrenciye kapanmadan önce kısa bir bildirim gösterilir.
+        </p>
+        <p className="text-[11px] leading-relaxed text-[var(--color-text-3)]">
+          Kaydedilmemiş çalışma kaybolabilir. Makineyi yeniden açmak için
+          öğrencinin fişle açması veya birinden yardım istemesi gerekir.
         </p>
       </div>
     </Modal>

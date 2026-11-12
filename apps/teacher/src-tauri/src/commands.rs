@@ -1408,3 +1408,89 @@ fn emit_browse(state: &Arc<AppState>) {
         .map(crate::browse::BrowseView::from);
     state.emit("browse-changed", view);
 }
+
+// -------------------------------------------------------- dosya toplama
+
+/// Seçili öğrencilerin bilgisayarından dosya(-ları) toplar.
+///
+/// NetSupport'un "dosya toplama" davranışı: öğretmen bir kök (`desktop` ·
+/// `documents` · `downloads`) ve bir desen (`sınav.zip`, `*.zip`) verir;
+/// öğrenci o kökte eşleşen dosyaları mevcut `FileOffer` akışından gönderir.
+/// `delete_source` açıksa ve gönderim öğrencide doğrulanırsa kaynak dosya
+/// silinir.
+///
+/// `destination` metni kapalı bir kümeye çözülür ve öğrenciye snake_case
+/// serileştirilir; tanınmayan değer hataya değil varsayılana (Belgeler) düşer.
+#[tauri::command]
+pub async fn collect_files(
+    state: State<'_, Arc<AppState>>,
+    device_ids: Vec<String>,
+    pattern: String,
+    destination: String,
+    delete_source: bool,
+) -> CmdResult<u32> {
+    let pattern = pattern.trim();
+    if pattern.is_empty() {
+        return Err("Desen boş olamaz.".into());
+    }
+
+    let destination = match destination.as_str() {
+        "desktop" => FileDestination::Desktop,
+        "downloads" => FileDestination::Downloads,
+        _ => FileDestination::Documents,
+    };
+
+    let mut sent = 0u32;
+    for raw in device_ids {
+        let id = parse_id(&raw)?;
+        let Some(tx) = state.registry.sender(id) else {
+            continue;
+        };
+        if tx
+            .send(ServerMessage::CollectRequest {
+                pattern: pattern.to_string(),
+                destination,
+                delete_source,
+            })
+            .await
+            .is_ok()
+        {
+            state
+                .db
+                .audit(AuditKind::FileCollectionRequested, Some(id), None);
+            sent += 1;
+        }
+    }
+
+    if sent == 0 {
+        return Err("Dosya toplanacak bağlı cihaz yok.".into());
+    }
+    tracing::info!(
+        adet = sent,
+        desen = %pattern,
+        hedef = destination.label(),
+        sil = delete_source,
+        "dosya toplama isteği gönderildi"
+    );
+    Ok(sent)
+}
+
+// ------------------------------------------------------- uzaktan kapatma
+
+/// Seçili öğrencinin bilgisayarını kapatır.
+///
+/// Geri dönüşü olmayan bir komut olduğu için arayüz onayı alır ve tek cihaza
+/// uygulanır; öğrenciye kapatmadan önce kısa bir bildirim gösterilir.
+#[tauri::command]
+pub async fn shutdown_device(state: State<'_, Arc<AppState>>, device_id: String) -> CmdResult<()> {
+    let id = parse_id(&device_id)?;
+    let Some(tx) = state.registry.sender(id) else {
+        return Err("Cihaz bağlı değil.".into());
+    };
+    tx.send(ServerMessage::ShutdownDevice)
+        .await
+        .map_err(|_| "Cihazla bağlantı kapandı.".to_string())?;
+    state.db.audit(AuditKind::DeviceShutdown, Some(id), None);
+    tracing::info!(%id, "uzaktan kapatma komutu gönderildi");
+    Ok(())
+}

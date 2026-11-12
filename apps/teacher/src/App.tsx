@@ -6,6 +6,7 @@ import {
   CheckSquare,
   ClipboardList,
   Hand,
+  FileArchive,
   FileDown,
   FileUp,
   Keyboard,
@@ -20,6 +21,7 @@ import {
   MonitorOff,
   MousePointerClick,
   Moon,
+  Power,
   RotateCcw,
   Rows3,
   ScreenShare,
@@ -39,6 +41,7 @@ import { api, AUDIT_LABELS, formatTime } from "./api";
 import {
   AuditDialog,
   BroadcastDialog,
+  CollectDialog,
   FocusDialog,
   LockDialog,
   RoomPickerDialog,
@@ -46,6 +49,7 @@ import {
   MessageDialog,
   PairingDialog,
   SettingsDialog,
+  ShutdownDialog,
 } from "./dialogs";
 import { open as openFileDialog, open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { TransfersDialog } from "./TransfersDialog";
@@ -114,6 +118,8 @@ function Console() {
   const [controlled, setControlled] = useState<string | null>(null);
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
+  const [collectOpen, setCollectOpen] = useState(false);
+  const [shutdownTarget, setShutdownTarget] = useState<DeviceView | null>(null);
   const [transfersOpen, setTransfersOpen] = useState(false);
 
   // Seçim ve filtre
@@ -532,6 +538,13 @@ function Console() {
                 onClick: pickAndSendFile,
               },
               {
+                label: "Topla",
+                icon: <FileArchive size={18} />,
+                disabled: actionTargets.length === 0,
+                title: "Seçili öğrencilerden dosya(ları) topla",
+                onClick: () => setCollectOpen(true),
+              },
+              {
                 label: "Dosya Al",
                 icon: <FileDown size={18} />,
                 title: "Alınan dosyaların klasörünü Windows Gezgini'nde aç",
@@ -565,6 +578,55 @@ function Console() {
                   helpDevices.length > 0
                     ? `${helpDevices.length} bekleyen talep`
                     : "Bekleyen talep yok",
+              },
+            ],
+          },
+          {
+            caption: "Sistem",
+            commands: [
+              {
+                label: "İnterneti Kes",
+                icon: <WifiOff size={18} />,
+                disabled: actionTargets.length === 0,
+                title:
+                  actionTargets.length === 0
+                    ? "Öğrenci seçin"
+                    : "Seçili öğrencilerin internete çıkışını keser (öğretmen bağlantısı açık kalır)",
+                onClick: () =>
+                  void (async () => {
+                    const ids = actionTargets.map((d) => d.deviceId);
+                    const n = await guard(api.blockInternet(ids, true));
+                    if (n !== undefined) show("success", `${n} öğrencinin interneti kesildi.`);
+                  })(),
+              },
+              {
+                label: "İnterneti Aç",
+                icon: <Wifi size={18} />,
+                disabled: actionTargets.length === 0,
+                title:
+                  actionTargets.length === 0
+                    ? "Öğrenci seçin"
+                    : "Seçili öğrencilerin internetini geri açar",
+                onClick: () =>
+                  void (async () => {
+                    const ids = actionTargets.map((d) => d.deviceId);
+                    const n = await guard(api.blockInternet(ids, false));
+                    if (n !== undefined) show("success", `${n} öğrencinin interneti açıldı.`);
+                  })(),
+              },
+              {
+                label: "Bilgisayarı Kapat",
+                icon: <Power size={18} />,
+                danger: true,
+                disabled: selectedDevices.length !== 1,
+                title:
+                  selectedDevices.length === 1
+                    ? "Seçili öğrencinin bilgisayarını kapat"
+                    : "Tek bir cihaz seçin",
+                onClick: () => {
+                  const d = selectedDevices[0];
+                  if (d) setShutdownTarget(d);
+                },
               },
             ],
           },
@@ -740,6 +802,20 @@ function Console() {
                 label: "Denetim Kayıtları",
                 icon: <ClipboardList size={18} />,
                 onClick: () => setAuditOpen(true),
+              },
+              {
+                label: "Bilgisayarı Kapat",
+                icon: <Power size={18} />,
+                danger: true,
+                disabled: selectedDevices.length !== 1,
+                title:
+                  selectedDevices.length === 1
+                    ? "Seçili öğrencinin bilgisayarını kapat"
+                    : "Tek bir cihaz seçin",
+                onClick: () => {
+                  const d = selectedDevices[0];
+                  if (d) setShutdownTarget(d);
+                },
               },
             ],
           },
@@ -1065,6 +1141,12 @@ function Console() {
         onClose={() => setMessageOpen(false)}
         onSent={refreshDevices}
       />
+      <CollectDialog
+        open={collectOpen}
+        targets={actionTargets}
+        onClose={() => setCollectOpen(false)}
+        onCollected={refreshDevices}
+      />
       <GroupDialog
         open={groupOpen}
         existing={groups}
@@ -1130,6 +1212,21 @@ function Console() {
           const ids = actionTargets.map((d) => d.deviceId);
           const n = await guard(api.lockDevices(ids, message));
           if (n !== undefined) show("success", `${n} cihazın ekranı kilitlendi.`);
+        }}
+      />
+
+      <ShutdownDialog
+        open={shutdownTarget !== null}
+        device={shutdownTarget}
+        onClose={() => setShutdownTarget(null)}
+        onShutdown={async (deviceId) => {
+          const device = shutdownTarget;
+          setShutdownTarget(null);
+          if (!device) return;
+          await guard(
+            api.shutdownDevice(deviceId),
+            `${device.hostname} kapatılıyor.`,
+          );
         }}
       />
 

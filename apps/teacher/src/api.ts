@@ -103,6 +103,13 @@ export const api = {
     destination: FileDestination,
     subpath: string | null,
   ) => call<string>("send_file", { deviceIds, path, destination, subpath }),
+  collectFiles: (
+    deviceIds: string[],
+    pattern: string,
+    destination: FileDestination,
+    deleteSource: boolean,
+  ) => call<number>("collect_files", { deviceIds, pattern, destination, deleteSource }),
+  shutdownDevice: (deviceId: string) => call<void>("shutdown_device", { deviceId }),
   getTransfers: () => call<TransferView[]>("get_transfers"),
   clearFinishedTransfers: () => call<void>("clear_finished_transfers"),
 
@@ -135,6 +142,8 @@ export const AUDIT_LABELS: Record<string, string> = {
   screen_stream_stopped: "Ekran yayını durdu",
   notice_sent: "Mesaj gönderildi",
   help_requested: "Yardım talebi",
+  file_collection_requested: "Dosya toplama istendi",
+  device_shutdown: "Bilgisayar kapatıldı",
 };
 
 export function formatTime(unixSeconds: number): string {

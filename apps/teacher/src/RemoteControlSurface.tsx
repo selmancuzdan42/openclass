@@ -196,7 +196,7 @@ export function RemoteControlSurface({
     <div
       ref={hostRef}
       tabIndex={active ? 0 : -1}
-      className={`relative size-full ${active ? "cursor-crosshair outline-none" : ""}`}
+      className={`relative size-full ${active ? "outline-none" : ""}`}
     >
       {children}
     </div>

@@ -10,6 +10,7 @@
 
 mod autostart;
 mod browse;
+mod collect;
 mod commands;
 mod config;
 mod identity;
@@ -38,6 +39,25 @@ use crate::identity::StudentIdentity;
 use crate::state::{AppState, ConnectionStatus, SharingState};
 
 pub fn run() {
+    // Windows: önce ikincil denetçi (watchdog) modunu ele al. Denetçi kendi
+    // sürecidir ve uygulamanın kendini kurmasına karışmaz. Bu bayrak
+    // platformdan bağımsız denetlenir; Windows dışı her zaman `false`'tur.
+    if crate::autostart::is_watchdog_mode() {
+        crate::autostart::run_watchdog();
+        return;
+    }
+
+    // Yönetici (admin) olarak çalış: farklı kapatma, internet engeli ve
+    // oturum denetimi için gerekli. Yükseltme başlatıldıysa bu örnek kapanır.
+    // Windows dışı her zaman devam eder (no-op).
+    match crate::autostart::promote_to_admin() {
+        Ok(false) => return,
+        Ok(true) => {}
+        Err(err) => {
+            tracing::warn!(error = %format!("{err:#}"), "yönetici yükseltmesi başlatılamadı; sınırlı yetkiyle çalışılıyor");
+        }
+    }
+
     let _log_guard = match openclass_common::logging::init(App::Student) {
         Ok(guard) => Some(guard),
         Err(err) => {
@@ -56,6 +76,14 @@ pub fn run() {
     };
 
     let cancel = state.cancel.clone();
+
+    // Yükseltilmiş süreçte ikincil denetçiyi (watchdog) başlat: ana süreç
+    // zorla sonlandırılırsa yeniden çalıştırır. Ana sürecin kimliğini işler
+    // ve zaten çalışan bir denetçi varsa ikincisini çıkarmaz. Windows dışı
+    // no-op'tur.
+    if let Err(err) = crate::autostart::ensure_watchdog() {
+        tracing::warn!(error = %format!("{err:#}"), "ikincil denetçi başlatılamadı");
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -146,6 +174,10 @@ pub fn run() {
                 _ => {}
             }
         });
+
+    // Düzgün kapanışta ikincil denetçinin de durmasını sağla: denetçi,
+    // ana sürecin `main.pid` dosyasının yok olduğunu görünce kendini sonlandırır.
+    crate::autostart::notify_graceful_exit();
 }
 
 fn bootstrap() -> Result<Arc<AppState>> {

@@ -969,6 +969,121 @@ async fn handle_server_message(
             }
         }
 
+        ServerMessage::CollectRequest {
+            pattern,
+            destination,
+            delete_source,
+        } => {
+            match crate::collect::find(destination, &pattern) {
+                Ok(files) if files.is_empty() => {
+                    tracing::info!(desen = %pattern, ?destination, "toplama isteği eşleşme bulamadı");
+                    state.show_notice(format!(
+                        "Öğretmeniniz dosya toplamak istedi ama \"{}\" deseni {} klasöründe hiçbir dosyayla eşleşmedi.",
+                        pattern,
+                        destination.label()
+                    ));
+                }
+                Ok(files) => {
+                    let adet = files.len();
+                    tracing::info!(
+                        desen = %pattern,
+                        adet,
+                        ?destination,
+                        sil = delete_source,
+                        "dosya toplama başladı"
+                    );
+                    // Öğrenciye toplama her zaman görünür; arkadan dosya çekilmez.
+                    state.show_notice(format!(
+                        "Öğretmeniniz {} klasörünüzden {} dosya topluyor (\"{}\"). Hazırlanıyor…",
+                        destination.label(),
+                        adet,
+                        pattern
+                    ));
+                    let sender = tx.clone();
+                    let st = Arc::clone(state);
+                    // Okuma ve gönderim bloklar; kontrol kanalı tıkanmaması için
+                    // ayrı bir iş parçacığında yürür.
+                    tokio::task::spawn_blocking(move || {
+                        let mut tamam = 0usize;
+                        let mut hatalar: Vec<String> = Vec::new();
+                        for path in &files {
+                            let boyut = match std::fs::metadata(path).map(|m| m.len()) {
+                                Ok(b) => b,
+                                Err(err) => {
+                                    hatalar.push(format!("{}: {}", path.display(), err));
+                                    continue;
+                                }
+                            };
+                            // Her dosya ayrı bir BrowseFile* akışıyla gider; istemci
+                            // ad, boyut ve özet sayesinde her akışı tek başına çözer.
+                            let request_id = uuid::Uuid::new_v4();
+                            match stream_file(&sender, request_id, path, boyut) {
+                                Ok(()) => {
+                                    tamam += 1;
+                                    // Kaynak silme yalnızca aktarım doğrulandıktan
+                                    // sonra; yarım kalmış aktarımda dosya kalır.
+                                    if delete_source {
+                                        crate::collect::delete_source(path);
+                                    }
+                                }
+                                Err(err) => hatalar.push(format!("{}: {}", path.display(), err)),
+                            }
+                        }
+
+                        let mut mesaj = format!(
+                            "Dosya toplama tamamlandı: {} dosya gönderildi{}.",
+                            tamam,
+                            if delete_source {
+                                " ve kaynak dosyalar silindi"
+                            } else {
+                                ""
+                            }
+                        );
+                        if !hatalar.is_empty() {
+                            mesaj.push_str(&format!(
+                                "\n\nGönderilemeyen {} dosya:",
+                                hatalar.len()
+                            ));
+                            for (i, h) in hatalar.iter().take(3).enumerate() {
+                                mesaj.push_str(&format!("\n  {} - {}", i + 1, h));
+                            }
+                            if hatalar.len() > 3 {
+                                mesaj.push_str(&format!("\n  … ve {} daha", hatalar.len() - 3));
+                            }
+                        }
+                        st.show_notice(mesaj);
+                    });
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        desen = %pattern,
+                        hata = %format!("{err:#}"),
+                        "toplama isteği reddedildi"
+                    );
+                    state.show_notice(format!(
+                        "Dosya toplama isteği reddedildi: \"{}\"\n{}",
+                        pattern, err
+                    ));
+                }
+            }
+        }
+
+        ServerMessage::ShutdownDevice => {
+            tracing::warn!("öğretmen bilgisayarı kapatmak istedi");
+            // Kapatmadan önce kısa, görünür bir bildirim: öğrenci işlerini
+            // kaydedebilsin. Daha sonra Windows kapatılır (diğer platformlarda
+            // işlem yapılmaz — mesaj sessizce kabul edilir).
+            state.show_notice(
+                "Öğretmeniniz bilgisayarınızı kapatıyor.\nAçık tüm işlerinizi kaydedin."
+                    .to_string(),
+            );
+            #[cfg(windows)]
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                shutdown_computer_windows();
+            });
+        }
+
         ServerMessage::StartKeyMonitor => {
             if !cfg!(windows) {
                 tracing::warn!("klavye izleme bu platformda desteklenmiyor");
@@ -1199,6 +1314,23 @@ fn unix_now() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// Bilgisayarı kapatır (yalnızca Windows).
+///
+/// Zorla + kapat (power off) bayrakları kullanılır. Yönetici yetkisi gerekir;
+/// ajan çalışma anında yükseltme yöntemiyle yönetici olarak çalıştığı için
+/// bu hak genelde mevcut olur. Yetki yoksa çağrı sessizce başarısız kalır.
+#[cfg(windows)]
+fn shutdown_computer_windows() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EWX_FORCE, EWX_POWEROFF, EWX_SHUTDOWN, ExitWindowsEx,
+    };
+    let status =
+        unsafe { ExitWindowsEx(EWX_SHUTDOWN | EWX_POWEROFF | EWX_FORCE, 0) };
+    if status == 0 {
+        tracing::error!("bilgisayar kapatılamadı (yetki veya oturum engeli)");
+    }
 }
 
 /// Anahtar kare aralığı.

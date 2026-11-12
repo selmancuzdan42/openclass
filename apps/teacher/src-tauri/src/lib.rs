@@ -110,6 +110,8 @@ pub fn run() {
             commands::open_downloads_dir,
             commands::get_download_root,
             commands::set_download_root,
+            commands::collect_files,
+            commands::shutdown_device,
             frame_base_url,
         ])
         .setup({

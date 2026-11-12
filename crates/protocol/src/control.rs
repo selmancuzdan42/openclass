@@ -504,6 +504,28 @@ pub enum ServerMessage {
         block: bool,
     },
 
+    /// Öğrencinin bilgisayarını kapatır.
+    ///
+    /// Öğretmen açık bir komutla seçili öğrencinin makinesini kapatır.
+    /// Geri dönüş yoktur; öğrenciye karşı şeffaf olmak için kapatmadan önce
+    /// ekranda kısa bir bildirim gösterilir.
+    ShutdownDevice,
+
+    /// Öğrencinin belirtilen kök klasöründen dosya(ları) toplar.
+    ///
+    /// NetSupport'un "dosya toplama" davranışı: öğretmen bir dosya adı veya
+    /// uzantı deseni (`sınav.zip`, `*.zip`) verir, öğrenci o kökte eşleşen
+    /// dosyaları son `FileOffer` akışından gönderir. `delete_source` açıksa
+    /// ve gönderim doğrulanırsa kaynak dosya öğrenciden silinir.
+    CollectRequest {
+        /// Eşleşme deseni: tam ad (`sınav.zip`) veya joker (`*.zip`).
+        pattern: String,
+        /// Dosyaların aranacağı kök (`Desktop` | `Documents` | `Downloads`).
+        destination: FileDestination,
+        /// Gönderim başarılı olunca kaynak dosya öğrenciden silinsin mi?
+        delete_source: bool,
+    },
+
     /// Öğrencinin klavyesinden tuşlama izlemesini başlatır.
     ///
     /// Öğrenci bir klavye kancası kurar ve tuş vuruşlarını `KeyEvent`

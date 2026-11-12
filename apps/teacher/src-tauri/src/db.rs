@@ -62,6 +62,8 @@ pub enum AuditKind {
     BrowseOpened,
     BrowseListed,
     FileDownloaded,
+    FileCollectionRequested,
+    DeviceShutdown,
 }
 
 impl AuditKind {
@@ -87,6 +89,8 @@ impl AuditKind {
             Self::FileDownloaded => "file_downloaded",
             Self::InternetBlocked => "internet_blocked",
             Self::InternetUnblocked => "internet_unblocked",
+            Self::FileCollectionRequested => "file_collection_requested",
+            Self::DeviceShutdown => "device_shutdown",
         }
     }
 }
