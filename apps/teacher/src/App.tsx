@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import {
   AlertTriangle,
   Cast,
@@ -112,8 +111,6 @@ function Console() {
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
   const [transfersOpen, setTransfersOpen] = useState(false);
-  /** Seçilmiş ama hedefi henüz sorulmamış dosya yolu. */
-  const [pendingFile, setPendingFile] = useState<string | null>(null);
   const [browserOpen, setBrowserOpen] = useState(false);
 
   // Seçim ve filtre
@@ -316,57 +313,36 @@ function Console() {
   }
 
   /**
-   * Dosya seçer, ardından hedef klasörü sorar.
+   * Gönderim için tek gezgin penceresini açar.
    *
-   * Seçim penceresi işletim sisteminin kendi iletişim kutusudur; öğretmen
-   * neyi gönderdiğini görür. Hedef kök ikinci adımda seçilir — her gönderimde
-   * sorulur, çünkü "ders notu Belgeler'e, uyarı dosyası Masaüstü'ne" gibi
-   * tercih dosyaya göre değişir. Gönderim arka planda yürür, durum
-   * "Gönderimler" penceresinden izlenir.
+   * Hedef klasör ve yerel dosya seçimi artık pencerenin içinde yapılır
+   * (NetSupport tarzı tek adım). Yalnızca ilk hedefin gezgini açılır; taşınan
+   * değer köke göre göreli olduğundan aynı hesap tüm alıcılarda kendi
+   * kullanıcı klasörünün altına denk gelir.
    */
   async function pickAndSendFile() {
-    const picked = await openFileDialog({
-      multiple: false,
-      directory: false,
-      title: "Öğrencilere gönderilecek dosyayı seçin",
-    });
-    if (typeof picked !== "string") return;
-
     const hedefler = actionTargets;
     if (hedefler.length === 0) {
       show("error", "Dosya gönderilecek bağlı cihaz yok.");
       return;
     }
-
-    // Hedef klasör ilk cihazın gezgininde seçilir. Taşınan değer köke göre
-    // göreli olduğu için aynı seçim bütün alıcılarda kendi kullanıcı
-    // klasörünün altına denk gelir.
     const ilk = hedefler[0];
     if (!ilk) return;
     const ok = await guard(api.openBrowser(ilk.deviceId));
     if (ok === undefined) return;
-
-    setPendingFile(picked);
     setBrowserOpen(true);
   }
 
-  /** Gezginde klasör seçildikten sonra gönderimi başlatır. */
-  async function sendPendingFile(
-    destination: FileDestination,
-    subpath: string | null,
+  /** Gezgin içinde gönderim başladığında pencereden çıkıp durumu gösterir. */
+  async function handleSendToFolder(
+    _destination: FileDestination,
+    _subpath: string | null,
     shown: string,
   ) {
-    const path = pendingFile;
-    setPendingFile(null);
+    await api.closeBrowser().catch(() => {});
     setBrowserOpen(false);
-    if (!path) return;
-
-    const ids = actionTargets.map((d) => d.deviceId);
-    const ok = await guard(api.sendFile(ids, path, destination, subpath));
-    if (ok !== undefined) {
-      show("success", `Dosya ${ids.length} cihaza gönderiliyor: ${shown}`);
-      setTransfersOpen(true);
-    }
+    show("success", `Dosya ${actionTargets.length} cihaza gönderiliyor: ${shown}`);
+    setTransfersOpen(true);
   }
 
   async function toggleControl() {
@@ -989,20 +965,11 @@ function Console() {
 
       <BrowserDialog
         open={browserOpen}
-        pickFolder={
-          pendingFile
-            ? {
-                fileName: pendingFile.split(/[/\\]/).pop() ?? "",
-                deviceCount: actionTargets.length,
-              }
-            : undefined
-        }
-        onPick={(destination, subpath, shown) =>
-          void sendPendingFile(destination, subpath, shown)
-        }
+        targetIds={actionTargets.map((d) => d.deviceId)}
+        onSendToFolder={handleSendToFolder}
         onClose={() => {
           setBrowserOpen(false);
-          setPendingFile(null);
+          void api.closeBrowser().catch(() => {});
         }}
       />
 

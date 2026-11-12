@@ -14,37 +14,39 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
+import { open as openFolderDialog, open as openFileDialog } from "@tauri-apps/plugin-dialog";
 
 import { api, formatTime } from "./api";
 import { Button, Empty, Modal, useToast } from "./ui";
 import type { BrowseEntry, BrowseRoot, BrowseView, FileDestination } from "./types";
 
 /**
- * Uzak dosya gezgini.
+ * Uzak dosya gezgini — NetSupport tarzı **tek pencere**.
  *
- * **Yalnızca listeleme ve indirme.** Yazma, silme, yeniden adlandırma ve
- * çalıştırma yoktur; protokolde böyle bir mesaj da tanımlı değil.
+ * Solda kök konumlar (Masaüstü/Belgeler/İndirilenler) kalıcı kısayollar
+ * olarak durur; tek tıkla o köke gidilir. Sağda gezinti alanı vardır:
+ * klasörler tıklanınca açılır, dosyalar listelenir.
  *
- * Kapsam kararını öğrenci tarafı verir: burada bir yol yazılamaz, yalnızca
- * öğrencinin açtığı köklerde gezilir.
+ * Klasörlerin satırında **Buraya Gönder**, dosyaların satırında **İndir**
+ * butonu bulunur. Gönderim iki ayrı adımda gezdirmez: gezilen klasör hedeftir,
+ * yerel dosya seçimi (işletim sistemi penceresi) gezgin açıkken yapılır,
+ * seçilince gönderim başlar.
+ *
+ * Burada bir yol yazılamaz, yalnızca öğrencinin açtığı köklerde gezilir;
+ * kapsam kararını öğrenci tarafı verir. Yazma, silme ve yeniden adlandırma
+ * protokolde tanımlı değildir.
  */
 export function BrowserDialog({
   open,
-  pickFolder,
-  onPick,
+  targetIds,
+  onSendToFolder,
   onClose,
 }: {
   open: boolean;
-  /**
-   * Klasör seçme kipi: indirme yerine hedef klasör seçilir.
-   *
-   * Dosya gönderiminde kullanılır. Gönderim birden çok cihaza gidebildiği
-   * için seçim tek bir öğrencinin gezgininde yapılır; taşınan değer köke
-   * göre göreli olduğundan aynı yol herkeste kendi klasörüne denk gelir.
-   */
-  pickFolder?: { fileName: string; deviceCount: number };
-  onPick?: (destination: FileDestination, subpath: string | null, shown: string) => void;
+  /** "Buraya Gönder"de dosyanın gönderileceği cihaz kimlikleri. Boşsa gönderim gizlenir. */
+  targetIds: string[];
+  /** Bir gönderim başarıyla başladığında üst kata haber verilir (pencere kapatılır, durum gösterilir). */
+  onSendToFolder: (destination: FileDestination, subpath: string | null, shown: string) => void;
   onClose: () => void;
 }) {
   const { show } = useToast();
@@ -81,12 +83,10 @@ export function BrowserDialog({
    * Gezgindeki mutlak yolu kök + göreli yola ayırır.
    *
    * Öğrencinin kullanıcı klasörü her makinede başka yerdedir
-   * (`C:\\Users\\ali\\Belgeler`), bu yüzden mutlak yol taşınamaz. Kök
-   * etiketi kapalı bir kümeye (`FileDestination`) eşlenir, kalan kısım
-   * göreli yol olarak gider.
-   *
-   * `OpenClass` kökü Belgeler'in altında olduğundan kendiliğinden
-   * `documents` + `OpenClass` olarak çözülür.
+   * (`C:\Users\ali\Belgeler`), bu yüzden mutlak yol taşınamaz. Kök etiketi
+   * kapalı bir kümeye (`FileDestination`) eşlenir, kalan kısım göreli yol
+   * olarak gider. `OpenClass` kökü Belgeler'in altında olduğundan
+   * kendiliğinden `documents` + `OpenClass` olarak çözülür.
    */
   function resolveTarget(
     path: string,
@@ -114,104 +114,89 @@ export function BrowserDialog({
     return { destination: best.destination, subpath: rel || null };
   }
 
+  /** Şu an gezilen klasörü hedef yapıp yerel dosya seçtirir ve gönderir. */
+  async function sendHere() {
+    if (!view) return;
+    const hedef = resolveTarget(view.path, view.roots);
+    if (!hedef) {
+      show("error", "Bu konuma gönderilemez.");
+      return;
+    }
+    if (targetIds.length === 0) {
+      show("error", "Dosya gönderilecek bağlı cihaz yok.");
+      return;
+    }
+    // Gezgin (modal) açık kalır; yerel seçim tek sistem penceresiyle üstte yapılır.
+    const picked = await openFileDialog({
+      multiple: false,
+      directory: false,
+      title: "Öğrencilere gönderilecek dosyayı seçin",
+    });
+    if (typeof picked !== "string") return; // vazgeçildi
+
+    try {
+      await api.sendFile(targetIds, picked, hedef.destination, hedef.subpath);
+      onSendToFolder(hedef.destination, hedef.subpath, view.path);
+    } catch (err) {
+      show("error", err instanceof Error ? err.message : String(err));
+    }
+  }
+
   const atRoots = !view?.path;
   const parent = parentOf(view?.path ?? "");
-  // Klasör seçme kipinde: şu an bulunulan klasör geçerli bir hedef mi?
-  const hedef =
-    pickFolder && view?.path ? resolveTarget(view.path, view.roots) : null;
+  const activeRoot = view?.path
+    ? view.roots.find(
+        (r) =>
+          view.path === r.path ||
+          view.path.startsWith(r.path + "\\") ||
+          view.path.startsWith(r.path + "/"),
+      )?.path ?? ""
+    : "";
+  const canSend = targetIds.length > 0 && !!view?.path;
 
   return (
     <Modal
       open={open}
       width="xl"
-      title={
-        pickFolder
-          ? `“${pickFolder.fileName}” nereye gönderilsin?`
-          : view
-            ? `${view.hostname} — dosyalar`
-            : "Dosya gezgini"
-      }
+      title={view ? `${view.hostname} — dosyalar` : "Dosya gezgini"}
       onClose={onClose}
       footer={
-        pickFolder ? (
-          <>
-            <span className="mr-auto text-[11px] leading-snug text-[var(--color-text-3)]">
-              {view?.hostname} üzerinde seçiyorsunuz; aynı klasör{" "}
-              {pickFolder.deviceCount} cihazın her birinde kendi
-              kullanıcı klasörü altında kullanılır.
-            </span>
-            <Button
-              onClick={async () => {
-                await api.closeBrowser().catch(() => {});
-                onClose();
-              }}
-            >
-              Vazgeç
-            </Button>
-            <Button
-              tone="accent"
-              disabled={!view || atRoots || !hedef}
-              title={
-                atRoots
-                  ? "Bir klasöre girin"
-                  : hedef
-                    ? undefined
-                    : "Bu konuma gönderilemez"
-              }
-              onClick={async () => {
-                if (!hedef || !view) return;
-                await api.closeBrowser().catch(() => {});
-                onPick?.(hedef.destination, hedef.subpath, view.path);
-              }}
-            >
-              <FileUp size={13} /> Buraya Gönder
-            </Button>
-          </>
-        ) : (
-          <>
-            <span className="mr-auto flex items-center gap-1.5 text-[11px]
-              text-[var(--color-text-3)]">
-              <Eye size={12} />
-              Öğrencide “dosyalarınıza bakılıyor” göstergesi duruyor
-            </span>
-            <Button
-              title={downloadRoot ? `İndirmeler: ${downloadRoot}` : "İndirme klasörünü seç"}
-              onClick={() => void pickDownloadRoot()}
-            >
-              <FolderCog size={13} /> Klasörü Değiştir
-            </Button>
-            <Button
-              title={downloadRoot || undefined}
-              onClick={() => void api.openDownloadsDir()}
-            >
-              <FolderOpen size={13} /> Toplanan Klasörü
-            </Button>
-            <Button
-              onClick={async () => {
-                await api.closeBrowser().catch(() => {});
-                onClose();
-              }}
-            >
-              Kapat
-            </Button>
-          </>
-        )
+        <>
+          <span className="mr-auto flex items-center gap-1.5 text-[11px]
+            text-[var(--color-text-3)]">
+            <Eye size={12} />
+            Öğrencide “dosyalarınıza bakılıyor” göstergesi duruyor
+          </span>
+          <Button
+            title={downloadRoot ? `İndirmeler: ${downloadRoot}` : "İndirme klasörünü seç"}
+            onClick={() => void pickDownloadRoot()}
+          >
+            <FolderCog size={13} /> Klasörü Değiştir
+          </Button>
+          <Button
+            title={downloadRoot || undefined}
+            onClick={() => void api.openDownloadsDir()}
+          >
+            <FolderOpen size={13} /> Toplanan Klasörü
+          </Button>
+          <Button
+            onClick={async () => {
+              await api.closeBrowser().catch(() => {});
+              onClose();
+            }}
+          >
+            Kapat
+          </Button>
+        </>
       }
     >
       {!view ? (
         <Empty title="Gezgin kapalı" detail="Bir cihaz seçip gezgini açın." />
       ) : (
         <div className="flex flex-col">
-          {/* Yol çubuğu */}
+          {/* Üst araç çubuğu: yol + Buraya Gönder */}
           <div className="flex items-center gap-2 border-b border-[var(--color-line)]
             bg-[var(--color-bg-1)] px-3 py-2">
-            <Button
-              disabled={atRoots}
-              title={atRoots ? "En üst seviyedesiniz" : "Üst klasör"}
-              onClick={() => void api.browseList(parent)}
-            >
-              <ArrowUp size={13} />
-            </Button>
             <span className="min-w-0 flex-1 truncate font-mono text-[11.5px]
               text-[var(--color-text-2)]">
               {view.path || "Paylaşılan konumlar"}
@@ -219,6 +204,20 @@ export function BrowserDialog({
             {view.loading && (
               <span className="text-[11px] text-[var(--color-text-3)]">yükleniyor…</span>
             )}
+            <Button
+              tone="accent"
+              disabled={!canSend}
+              title={
+                atRoots
+                  ? "Bir klasöre gidin"
+                  : targetIds.length === 0
+                    ? "Gönderilecek cihaz yok"
+                    : "Şu an gezilen klasöre dosya gönder"
+              }
+              onClick={() => void sendHere()}
+            >
+              <FileUp size={13} /> Buraya Gönder
+            </Button>
           </div>
 
           {view.error && (
@@ -230,43 +229,87 @@ export function BrowserDialog({
 
           {view.download && <DownloadBar download={view.download} />}
 
-          {/* İçerik */}
-          <div className="max-h-[52vh] overflow-y-auto">
-            {atRoots ? (
-              view.roots.length === 0 ? (
-                <Empty
-                  title="Paylaşılan konum yok"
-                  detail="Öğrencide erişilebilir bir klasör bulunamadı."
-                />
-              ) : (
-                view.roots.map((r) => (
-                  <button
-                    key={r.path}
-                    onClick={() => void api.browseList(r.path)}
-                    className="flex w-full items-center gap-2 border-b
-                      border-[var(--color-line)] px-3 py-2 text-left text-[12.5px]
-                      hover:bg-[var(--color-bg-2)]"
-                  >
-                    <HardDrive size={14} className="text-[var(--color-accent)]" />
-                    <span className="font-medium">{r.label}</span>
-                    <span className="ml-auto truncate font-mono text-[11px]
-                      text-[var(--color-text-3)]">
-                      {r.path}
+          <div className="flex min-h-0">
+            {/* Sol: kök kısayolları + yukarı çık */}
+            <div className="flex w-[180px] shrink-0 flex-col border-r border-[var(--color-line)]">
+              <p className="px-3 pt-2 text-[10.5px] font-semibold uppercase
+                tracking-wide text-[var(--color-text-3)]">
+                Konumlar
+              </p>
+              <div className="scroll-thin min-h-0 flex-1 overflow-y-auto pb-1">
+                {view.roots.length === 0 ? (
+                  <p className="px-3 py-2 text-[11px] text-[var(--color-text-3)]">
+                    Erişilebilir konum yok
+                  </p>
+                ) : (
+                  view.roots.map((r) => {
+                    const active = r.path === activeRoot;
+                    return (
+                      <button
+                        key={r.path}
+                        onClick={() => void api.browseList(r.path)}
+                        title={r.path}
+                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left
+                          text-[12px] transition-colors ${
+                            active
+                              ? "bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]"
+                              : "text-[var(--color-text-2)] hover:bg-[var(--color-bg-2)]"
+                          }`}
+                      >
+                        <HardDrive size={14} className="shrink-0" />
+                        <span className="truncate">{r.label}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="border-t border-[var(--color-line)] p-2">
+                <Button
+                  disabled={atRoots}
+                  title={atRoots ? "En üst seviyedesiniz" : "Üst klasör"}
+                  className="w-full justify-start"
+                  onClick={() => void api.browseList(parent)}
+                >
+                  <ArrowUp size={13} /> Yukarı Çık
+                </Button>
+              </div>
+            </div>
+
+            {/* Sağ: gezinti içeriği */}
+            <div className="max-h-[56vh] min-w-0 flex-1 overflow-y-auto">
+              {atRoots ? (
+                view.roots.length === 0 ? (
+                  <Empty
+                    title="Paylaşılan konum yok"
+                    detail="Öğrencide erişilebilir bir klasör bulunamadı."
+                  />
+                ) : (
+                  <div className="p-3">
+                    <span className="text-[11.5px] text-[var(--color-text-3)]">
+                      İçeriye girmek için soldan bir konum seçin veya bir klasörü açın.
                     </span>
-                  </button>
-                ))
-              )
-            ) : view.entries.length === 0 ? (
-              <Empty title="Klasör boş" detail="Burada gösterilecek bir şey yok." />
-            ) : (
-              <table className="w-full">
-                <tbody>
-                  {view.entries.map((e) => (
-                    <Row key={e.name} entry={e} dir={view.path} busy={!!view.download} />
-                  ))}
-                </tbody>
-              </table>
-            )}
+                  </div>
+                )
+              ) : view.entries.length === 0 ? (
+                <Empty title="Klasör boş" detail="Burada gösterilecek bir şey yok." />
+              ) : (
+                <table className="w-full">
+                  <tbody>
+                    {view.entries.map((e) => (
+                      <Row
+                        key={e.name}
+                        entry={e}
+                        dir={view.path}
+                        busy={!!view.download}
+                        canSend={canSend}
+                        onSendFolder={() => void sendHere()}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -278,10 +321,14 @@ function Row({
   entry,
   dir,
   busy,
+  canSend,
+  onSendFolder,
 }: {
   entry: BrowseEntry;
   dir: string;
   busy: boolean;
+  canSend: boolean;
+  onSendFolder: () => void;
 }) {
   const path = joinPath(dir, entry.name);
 
@@ -294,33 +341,46 @@ function Row({
           <FileIcon size={14} className="text-[var(--color-text-3)]" />
         )}
       </td>
-      <td className="py-1.5 pl-2 text-[12.5px]">
+      <td className="max-w-[36vw] py-1.5 pl-2 text-[12.5px]">
         {entry.isDir ? (
           <button
             onClick={() => void api.browseList(path)}
-            className="text-left hover:underline"
+            className="max-w-full truncate text-left hover:underline"
           >
             {entry.name}
           </button>
         ) : (
-          entry.name
+          <span className="truncate">{entry.name}</span>
         )}
       </td>
-      <td className="w-24 text-right text-[11px] text-[var(--color-text-3)]">
+      <td className="w-24 pr-2 text-right text-[11px] text-[var(--color-text-3)]">
         {entry.isDir ? "—" : formatSize(entry.size)}
       </td>
       <td className="w-32 pr-2 text-right text-[11px] text-[var(--color-text-3)]">
         {entry.modified > 0 ? formatTime(entry.modified) : "—"}
       </td>
-      <td className="w-10 pr-3 text-right">
-        {!entry.isDir && (
+      <td className="w-36 pr-3 text-right">
+        {entry.isDir ? (
+          canSend && (
+            <Button
+              tone="subtle"
+              className="!h-[22px] !px-1.5 text-[11.5px]"
+              title="Şu an gezilen bu klasöre dosya gönder"
+              onClick={onSendFolder}
+            >
+              <FileUp size={12} /> Buraya Gönder
+            </Button>
+          )
+        ) : (
           <button
             disabled={busy}
             title={busy ? "Başka bir indirme sürüyor" : "Bu dosyayı indir"}
             onClick={() => void api.browseFetch(path)}
-            className="rounded p-1 hover:bg-[var(--color-bg-3)] disabled:opacity-40"
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11.5px]
+              text-[var(--color-text-2)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-text)]
+              disabled:opacity-40"
           >
-            <Download size={13} />
+            <Download size={12} /> İndir
           </button>
         )}
       </td>
