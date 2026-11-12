@@ -30,7 +30,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::PairedTeacher;
 use crate::net::pinned_tls::PinnedFingerprintVerifier;
-use crate::state::{AppState, ConnectionStatus, ReceivedNotice, SharingState};
+use crate::state::{AppState, ConnectTarget, ConnectionStatus, ReceivedNotice, SharingState};
 use openclass_screen::CaptureSession;
 use openclass_screen::TileEncoder;
 
@@ -42,6 +42,13 @@ const BACKOFF_MAX: Duration = Duration::from_secs(30);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 /// Bu süre boyunca öğretmenden hiç mesaj gelmezse bağlantı ölü sayılır.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(45);
+/// Eşleştirilmemişken otomatik müracaat (auto-probe) arasındaki sabit bekleme.
+///
+/// NetSupport tarzı davranış: öğretmen henüz yetkilendirmemişse bile öğrenci
+/// ağda gördüğü öğretmene bu aralıkla yeniden Hello atar. Öğretmen
+/// 'Yetkilendir' deyince sonraki bağlantı `Authorized` gelir ve otomatik
+/// kabul görülür.
+const AUTO_PROBE_INTERVAL: Duration = Duration::from_secs(5);
 /// Giden mesaj kuyruğu. Dolarsa kareler düşürülür; bellek şişmez.
 const SEND_QUEUE: usize = 8;
 
@@ -101,14 +108,27 @@ pub async fn run(state: Arc<AppState>, cancel: CancellationToken) {
             if crate::testing::try_autopair(&state) {
                 continue;
             }
-            if crate::testing::autopair_code().is_some() {
+
+            // Eşleştirilmemişken keşifte bir öğretmen görünüyorsa NetSupport
+            // tarzı otomatik müracaat başlat: Hello gönderilir, öğretmen henüz
+            // yetkilendirmemişse bağlantı sessizce kapanır ve birkaç saniye
+            // sonra yeniden denenir. Öğretmen 'Yetkilendir' deyince sonraki
+            // bağlantı `Authorized` gelir ve normal AuthChallenge akışı
+            // çalışır — elle kod girmeye gerek kalmaz.
+            if let Some(target) = discovered_target(&state) {
+                auto_probe(&state, target, cancel.clone()).await;
+            } else if crate::testing::autopair_code().is_some() {
+                // Test modu: öğretmen henüz keşfedilmedi; kısa aralıklarla dene.
                 tokio::select! {
                     _ = cancel.cancelled() => return,
                     _ = state.wake.notified() => {}
                     _ = tokio::time::sleep(Duration::from_secs(2)) => {}
                 }
             } else {
-                wait_for_wake(&state, &cancel).await;
+                // Öğretmen yok. Keşif uyandırma sinyali yalnızca eşleşilmiş
+                // öğretmene verilir; eşleşmemiş öğrenci periyodik tarayarak
+                // ağda yeni beliren bir öğretmeni yakalar.
+                wait_for_wake_or_scan(&state, &cancel).await;
             }
             continue;
         };
@@ -127,6 +147,11 @@ pub async fn run(state: Arc<AppState>, cancel: CancellationToken) {
         let reason = match outcome {
             Ok(()) => {
                 backoff = BACKOFF_MIN;
+                None
+            }
+            Err(err) if is_awaiting_approval(&err) => {
+                // Öğretmen henüz yetkilendirmemiş; bir hata değil, otomatik
+                // bekleme durumu. Mevcut backoff ile sessizce yeniden denenir.
                 None
             }
             Err(err) => {
@@ -156,6 +181,60 @@ async fn wait_for_wake(state: &Arc<AppState>, cancel: &CancellationToken) {
         _ = cancel.cancelled() => {}
         _ = state.wake.notified() => {}
     }
+}
+
+/// Eşleştirilmemişken iptali, uyandırma sinyalini ve periyodik taramayı dinler.
+///
+/// Keşif (`announce.rs`) uyandırma sinyalini yalnızca eşleşilmiş öğretmene
+/// verir; eşleşmemiş bir öğrencinin ağda yeni beliren bir öğretmeni fark
+/// edebilmesi bu periyodik uyanışa bağlıdır.
+async fn wait_for_wake_or_scan(state: &Arc<AppState>, cancel: &CancellationToken) {
+    tokio::select! {
+        _ = cancel.cancelled() => {}
+        _ = state.wake.notified() => {}
+        _ = tokio::time::sleep(AUTO_PROBE_INTERVAL) => {}
+    }
+}
+
+/// Keşif listesindeki ilk (en erken görünen) öğretmene bağlantı hedefi üretir.
+///
+/// Eşleştirilmemişken otomatik müracaat için kullanılır; parmak izi keşiften
+/// alındığı için `connect_once`'in mevcut fingerprint handling'i aynen işler.
+fn discovered_target(state: &AppState) -> Option<ConnectTarget> {
+    let teachers = state.teachers.read();
+    let seen = teachers.values().min_by_key(|t| t.last_seen)?;
+    Some(ConnectTarget {
+        host: seen.host.clone(),
+        port: seen.control_port,
+        fingerprint: seen.fingerprint.clone(),
+    })
+}
+
+/// Eşleştirilmemişken keşifteki öğretmene tek bir otomatik müracaat dener ve
+/// müracaatlar arası sabit aralık kadar bekler.
+async fn auto_probe(state: &Arc<AppState>, target: ConnectTarget, cancel: CancellationToken) {
+    let Some(expected) = to_fingerprint(&target.fingerprint) else {
+        // Keşiften gelen parmak izi bozuksa öğretmen atlanır, tarama sürer.
+        wait_for_wake_or_scan(state, &cancel).await;
+        return;
+    };
+    let outcome = connect_once(
+        state,
+        &target.host,
+        target.port,
+        Some(expected),
+        None,
+        cancel.clone(),
+    )
+    .await;
+    if matches!(&outcome, Err(err) if is_awaiting_approval(err)) {
+        tracing::debug!("öğretmen henüz yetkilendirmemiş, otomatik müracaat sürüyor");
+    } else if let Err(err) = &outcome {
+        tracing::debug!(hata = %format!("{err:#}"), "otomatik müracaat başarısız, yeniden deneniyor");
+    } else {
+        tracing::info!("otomatik müracaat bağlantısı kapandı, yeniden deneniyor");
+    }
+    wait_for_wake_or_scan(state, &cancel).await;
 }
 
 fn to_fingerprint(bytes: &[u8]) -> Option<[u8; 32]> {
@@ -288,6 +367,31 @@ type WsSource = futures_util::stream::SplitStream<
     tokio_tungstenite::WebSocketStream<tokio_rustls::client::TlsStream<TcpStream>>,
 >;
 
+/// Eşleştirilmemiş, kod girilmemiş ve öğretmen bu cihazı kaydetmemişken
+/// bağlantı bu hata tipiyle sessizce kapatılır.
+///
+/// "Otomatik bekliyorum" durumunu taşır: otomatik müracaat döngüsü bunu
+/// kullanıcıya hata olarak göstermez, sabit aralıkla yeniden dener. Öğretmen
+/// 'Yetkilendir' deyince sonraki bağlantı `Authorized` gelir.
+#[derive(Debug)]
+struct AwaitingApproval;
+
+impl std::fmt::Display for AwaitingApproval {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Öğretmen henüz bu cihazı yetkilendirmemiş; otomatik beklemeye devam ediliyor."
+        )
+    }
+}
+
+impl std::error::Error for AwaitingApproval {}
+
+/// Sonucun sessizce beklemeyi gerektiren bir müracaat kesintisi olup olmadığı.
+fn is_awaiting_approval(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<AwaitingApproval>().is_some()
+}
+
 /// Hello → (eşleştirme | challenge) → yetkilendirildi.
 /// Başarılıysa öğretmenin adını döner.
 #[allow(clippy::too_many_arguments)]
@@ -368,10 +472,12 @@ async fn handshake(
 
         DeviceStatus::PendingPairing => {
             let Some(code) = pairing_code else {
-                bail!(
-                    "Bu cihaz öğretmen konsolunda kayıtlı değil. \
-                     Öğretmenden eşleştirme kodu isteyip 'Eşleştir' adımını yapın."
-                );
+                // Kod girilmemiş: öğretmen bu cihazı henüz kaydetmemiş olabilir
+                // ('Yetkilendir' bekleniyor). PairRequest gönderilemez (kod yok);
+                // bağlantıyı sessizce kapatır, döngü otomatik müracaata
+                // (bekle + yeniden dene) devam eder. Öğretmen yetkilendirdiğinde
+                // sonraki bağlantı `Authorized` gelir; elle kod gerekmez.
+                return Err(anyhow!(AwaitingApproval));
             };
 
             let public_key = state.identity.public_key();

@@ -137,6 +137,14 @@ pub struct Registry {
     connected: RwLock<HashMap<Uuid, ConnectedDevice>>,
     flags: RwLock<HashMap<Uuid, DeviceFlags>>,
     screens: RwLock<HashMap<Uuid, openclass_screen::ScreenBuffer>>,
+    /// Hello ile gelip DB'de kayıtlı olmayan cihazların açık anahtarları.
+    ///
+    /// NetSupport tarzı tek tıkla 'Yetkilendir' akışı için: öğrenci keşifte
+    /// görünüp Hello atarken sunduğu public key burada bekletilir; öğretmen
+    /// listede cihazı görüp 'Yetkilendir'e basınca anahtar buradan alınır ve
+    /// veritabanına `authorized` olarak kaydedilir. Cihaz DB'ye girince kayıt
+    /// bırakılır (bkz. `take_waiting_key`).
+    waiting_keys: RwLock<HashMap<Uuid, Vec<u8>>>,
 }
 
 impl Default for Registry {
@@ -152,6 +160,7 @@ impl Registry {
             connected: RwLock::new(HashMap::new()),
             flags: RwLock::new(HashMap::new()),
             screens: RwLock::new(HashMap::new()),
+            waiting_keys: RwLock::new(HashMap::new()),
         }
     }
 
@@ -171,6 +180,25 @@ impl Registry {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn discovered_devices(&self) -> Vec<DiscoveredDevice> {
         self.discovered.read().values().cloned().collect()
+    }
+
+    // ---------------------------------------------------- bekleyen yetkilendirme
+
+    /// Hello ile gelen, DB'de kayıtlı olmayan cihazın açık anahtarını kuyruğa yazar.
+    ///
+    /// NetSupport tarzı akışın anahtarı: öğrenci henüz eşleştirilmemişken
+    /// sunduğu public key burada tutulur; öğretmen 'Yetkilendir'e basınca
+    /// [`Self::take_waiting_key`] ile alınır ve DB'ye kaydedilir.
+    pub fn store_waiting_key(&self, device_id: Uuid, public_key: Vec<u8>) {
+        self.waiting_keys.write().insert(device_id, public_key);
+    }
+
+    /// Bekleyen yetkilendirme anahtarını alır ve kuyruktan çıkarır.
+    ///
+    /// Anahtar alındığında kuyruktan silinir: cihaz DB'ye yetkili olarak
+    /// girince artık Hello'da bu kuyruğa tekrar düşmez (bkz. `authenticate`).
+    pub fn take_waiting_key(&self, device_id: Uuid) -> Option<Vec<u8>> {
+        self.waiting_keys.write().remove(&device_id)
     }
 
     // --------------------------------------------------------------- bağlantı

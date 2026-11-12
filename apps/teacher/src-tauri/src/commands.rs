@@ -98,6 +98,53 @@ pub async fn revoke_device(state: State<'_, Arc<AppState>>, device_id: String) -
     Ok(())
 }
 
+/// Öğrencinin Hello'da sunduğu anahtarla cihazı tek tıkla yetkilendirir.
+///
+/// NetSupport tarzı akış: öğrenci keşifte görünüp Hello atarken açık anahtarı
+/// bekleyen kuyruğa yazılır; öğretmen 'Yetkilendir'e basınca anahtar buradan
+/// alınır, `authorized` olarak DB'ye kaydedilir ve bir sonraki bağlantıda
+/// Hello → AuthChallenge otomatik kabul edilir — eşleştirme kodu gerekmez.
+///
+/// Mevcut kod akışı bozulmaz; bu akış buna **ek** bir yoldur. Anahtar
+/// kuyrukta yoksa öğrenci henüz Hello atmamış ya da cihaz zaten kayıtlı
+/// demektir; bu durumda işlem başarısız sayılır.
+#[tauri::command]
+pub fn authorize_device(
+    state: State<'_, Arc<AppState>>,
+    device_id: String,
+) -> CmdResult<()> {
+    let id = parse_id(&device_id)?;
+
+    let Some(public_key) = state.registry.take_waiting_key(id) else {
+        return Err("Cihaz henüz bağlanmadı veya anahtarı alınamadı.".into());
+    };
+
+    let key: [u8; 32] = public_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| "Geçersiz açık anahtar: 32 bayt olmalı.".to_string())?;
+
+    // Hostname'i keşif kaydından bulur; cihaz artık listede yoksa kimlik kullanılır.
+    let hostname = state
+        .registry
+        .discovered_devices()
+        .into_iter()
+        .find(|d| d.device_id == id)
+        .map(|d| d.hostname)
+        .unwrap_or_else(|| device_id.clone());
+
+    state
+        .db
+        .upsert_paired_device(id, &hostname, &key, None)
+        .map_err(|e| fail("Cihaz yetkilendirilemedi", e))?;
+    state
+        .db
+        .audit(AuditKind::DevicePaired, Some(id), Some(&hostname));
+    state.notify_devices_changed();
+    tracing::info!(%id, %hostname, "cihaz tek tıkla yetkilendirildi");
+    Ok(())
+}
+
 // ------------------------------------------------------------- eşleştirme
 
 #[derive(serde::Serialize)]

@@ -25,6 +25,7 @@ import {
   ScreenShare,
   ScreenShareOff,
   Settings as SettingsIcon,
+  ShieldCheck,
   ShieldOff,
   SquareDashed,
   Sun,
@@ -730,6 +731,19 @@ function Console() {
           onSelect: () => void guard(api.clearHelpRequest(menuDevice.deviceId)),
         },
         null,
+        {
+          label: "Yetkilendir",
+          icon: <ShieldCheck size={13} />,
+          disabled:
+            menuDevice.authorization === "authorized" || !menuDevice.online,
+          onSelect: async () => {
+            await guard(
+              api.authorizeDevice(menuDevice.deviceId),
+              `${menuDevice.hostname} yetkilendirildi.`,
+            );
+            void refreshDevices();
+          },
+        },
         {
           label: "Yetkiyi kaldır",
           icon: <ShieldOff size={13} />,

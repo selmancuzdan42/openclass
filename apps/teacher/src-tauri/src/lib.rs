@@ -71,6 +71,7 @@ pub fn run() {
             commands::search_devices,
             commands::set_display_name,
             commands::revoke_device,
+            commands::authorize_device,
             commands::start_pairing,
             commands::cancel_pairing,
             commands::get_pairing,

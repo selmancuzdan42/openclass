@@ -126,6 +126,7 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   send_notice: (args) => (args.deviceIds as string[]).length,
   clear_help_request: () => null,
   revoke_device: () => null,
+  authorize_device: () => null,
   set_display_name: () => null,
   update_settings: () => null,
   save_group: (args) => {

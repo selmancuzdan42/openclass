@@ -397,8 +397,62 @@ async fn authenticate(
 
     // Kilit guard'ı await üzerinden taşınmasın diye ad baştan kopyalanır.
     let teacher_name = state.config.read().teacher_name.clone();
-    let record = state.db.device(device_id)?;
-    tracing::debug!(%peer, %device_id, %hostname, %app_version, kayitli = record.is_some(), "Hello alındı");
+    let mut record = state.db.device(device_id)?;
+    tracing::debug!(%peer, %device_id, %hostname, %app_version, kayitli = !record.is_none(), "Hello alındı");
+
+    // NetSupport tarzı otomatik kabul: DB'de kayıtlı olmayan (yeni) bir cihaz;
+    //   * bilgisayar adı LAB/BLAB ile başlıyorsa VEYA
+    //   * Hello'da bildirdiği oda adı, konsolun aktif odasıyla eşleşiyorsa
+    // öğretmen hiçbir şeye dokunmadan anında yetkilendirilir. Öğrenci İP'den
+    // bağlanır bağlanmaz otomatik kabul görür; eşleştirme kodu ya da
+    // 'Yetkilendir' tıklaması gerekmez.
+    //
+    // Oda karşılaştırması büyük/küçük harf duyarsızdır: öğrenci `blab1`
+    // yazsa bile konsolun `BLAB1` odasıyla eşleşir.
+    //
+    // Hiçbir koşula uymayan yeni cihazlar (ör. öğretmenin kendi makinesi ya
+    // da yabancı) kuyruğa yazılır ve 'Yetkilendir' ile onay bekler — böylece
+    // otomatik kabul yalnızca laboratuvar alanıyla sınırlı kalır.
+    if record.is_none() {
+        let cfg = state.config.read();
+        let active_room = cfg
+            .active_room
+            .as_ref()
+            .map(|r| r.trim().to_ascii_uppercase());
+        drop(cfg);
+
+        let room_norm = room
+            .as_ref()
+            .map(|r| r.to_ascii_uppercase());
+        let room_matches = room_norm
+            .as_ref()
+            .zip(active_room.as_ref())
+            .is_some_and(|(r, a)| !a.is_empty() && r == a);
+        let is_lab_host =
+            hostname.starts_with("LAB") || hostname.starts_with("BLAB");
+        if is_lab_host || room_matches {
+            state
+                .db
+                .upsert_paired_device(device_id, &hostname, &claimed_key, None)
+                .map_err(|e| anyhow::anyhow!("otomatik yetkilendirme kaydedilemedi: {e}"))?;
+            state
+                .db
+                .audit(AuditKind::DevicePaired, Some(device_id), Some(&hostname));
+            state.notify_devices_changed();
+            tracing::info!(
+                %device_id, %hostname, odeslendi = room_matches, "yeni cihaz otomatik yetkilendirildi"
+            );
+            record = state.db.device(device_id)?;
+        } else {
+            // NetSupport tarzı tek tıkla 'Yetkilendir' için: yeni (kayıtsız)
+            // cihazın Hello'daki açık anahtarı bekleyen kuyruğa yazılır.
+            // Öğretmen listede cihazı görüp 'Yetkilendir'e bastığında anahtar
+            // buradan alınır ve `authorized` olarak DB'ye kaydedilir.
+            state
+                .registry
+                .store_waiting_key(device_id, claimed_key.to_vec());
+        }
+    }
 
     // Öğretmen o anda eşleştirme kodu üretmiş mi?
     //

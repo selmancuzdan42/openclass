@@ -35,6 +35,7 @@ export const api = {
   setDisplayName: (deviceId: string, name: string | null) =>
     call<void>("set_display_name", { deviceId, name }),
   revokeDevice: (deviceId: string) => call<void>("revoke_device", { deviceId }),
+  authorizeDevice: (deviceId: string) => call<void>("authorize_device", { deviceId }),
 
   startPairing: () => call<PairingInfo>("start_pairing"),
   cancelPairing: () => call<void>("cancel_pairing"),
