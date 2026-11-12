@@ -1126,6 +1126,13 @@ async fn handle_client_message(
             state.notify_devices_changed();
         }
 
+        ClientMessage::InternetBlockAck { blocked, detail } => {
+            // Öğrenci engeli uyguladı/geri aldı. Yönetim kanalı açık kaldığı
+            // için buraya ulaşmak başlı başına başarıdır; durumu loglarız.
+            // Arayüz geri bildirimi komut tarafındaki yerel toast'tan gelir.
+            tracing::info!(%device_id, blocked, detail = ?detail, "internet engeli durumu");
+        }
+
         ClientMessage::MessageAck { message_id } => {
             tracing::debug!(%device_id, %message_id, "mesaj görüldü");
         }

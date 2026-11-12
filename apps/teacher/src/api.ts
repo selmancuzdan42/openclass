@@ -51,6 +51,8 @@ export const api = {
 
   sendNotice: (deviceIds: string[], title: string, body: string) =>
     call<number>("send_notice", { deviceIds, title, body }),
+  blockInternet: (deviceIds: string[], block: boolean) =>
+    call<number>("block_internet", { deviceIds, block }),
   clearHelpRequest: (deviceId: string) => call<void>("clear_help_request", { deviceId }),
 
   getServerInfo: () => call<ServerInfo>("get_server_info"),
@@ -117,6 +119,8 @@ export const AUDIT_LABELS: Record<string, string> = {
   browse_opened: "Dosya gezgini açıldı",
   browse_listed: "Klasör listelendi",
   file_downloaded: "Dosya indirildi",
+  internet_blocked: "İnternet engellendi",
+  internet_unblocked: "İnternet açıldı",
   device_rejected: "Eşleştirme reddedildi",
   device_revoked: "Cihaz yetkisi kaldırıldı",
   device_connected: "Cihaz bağlandı",

@@ -941,6 +941,33 @@ async fn handle_server_message(
             state.unlock_screen();
         }
 
+        ServerMessage::InternetBlock { block } => {
+            match crate::netblock::set_internet_blocked(block) {
+                Ok(blocked) => {
+                    tracing::info!(blocked, "internet engelleme uygulandı");
+                    let _ = tx
+                        .send(ClientMessage::InternetBlockAck {
+                            blocked,
+                            detail: None,
+                        })
+                        .await;
+                }
+                Err(detail) => {
+                    tracing::warn!(istek = block, hata = %detail, "internet engelleme uygulanamadı");
+                    // Hata durumunda gerçek anlık engel durumunu bildir: kısmen
+                    // uygulanmışsa (ör. izin kuralı hazır, profil denemedi) doğru
+                    // durum söylensin.
+                    let current = crate::netblock::is_internet_blocked().unwrap_or(false);
+                    let _ = tx
+                        .send(ClientMessage::InternetBlockAck {
+                            blocked: current,
+                            detail: Some(detail),
+                        })
+                        .await;
+                }
+            }
+        }
+
         ServerMessage::TeacherScreenStart {
             broadcast_id,
             teacher_name,

@@ -1031,6 +1031,55 @@ pub async fn unlock_devices(
     Ok(sent)
 }
 
+// ------------------------------------------------------- internet engeli
+
+/// Seçili öğrencilerin internete çıkışını keser veya açar.
+///
+/// NetSupport'un "İnterneti kes" davranışı: öğrencinin internet yönlendirmesi
+/// engellenir ama öğretmen bağlantısı (aynı LAN) dokunulmaz. Böylece yönetim
+/// kanalı açık kalır ve öğretmen engeli uzaktan geri açabilir.
+///
+/// `block=true` interneti keser, `false` geri açar.
+#[tauri::command]
+pub async fn block_internet(
+    state: State<'_, Arc<AppState>>,
+    device_ids: Vec<String>,
+    block: bool,
+) -> CmdResult<usize> {
+    if device_ids.is_empty() {
+        return Err("Cihaz seçilmedi.".into());
+    }
+
+    let mut sent = 0usize;
+    for raw in &device_ids {
+        let id = parse_id(raw)?;
+        if let Some(tx) = state.registry.sender(id) {
+            if tx
+                .send(ServerMessage::InternetBlock { block })
+                .await
+                .is_ok()
+            {
+                state.db.audit(
+                    if block {
+                        AuditKind::InternetBlocked
+                    } else {
+                        AuditKind::InternetUnblocked
+                    },
+                    Some(id),
+                    None,
+                );
+                sent += 1;
+            }
+        }
+    }
+
+    if sent == 0 {
+        return Err("Hiçbir cihaza ulaşılamadı.".into());
+    }
+    tracing::info!(adet = sent, block, "internet engeli gönderildi");
+    Ok(sent)
+}
+
 // -------------------------------------------------------- dosya gönderme
 
 /// Seçili öğrencilere dosya gönderir.

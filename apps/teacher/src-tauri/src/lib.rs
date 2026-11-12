@@ -80,6 +80,7 @@ pub fn run() {
             commands::focus_device,
             commands::unfocus_devices,
             commands::send_notice,
+            commands::block_internet,
             commands::clear_help_request,
             commands::get_server_info,
             commands::update_settings,

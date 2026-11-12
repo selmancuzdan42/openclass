@@ -56,6 +56,8 @@ pub enum AuditKind {
     RemoteControlStopped,
     ScreenLocked,
     ScreenUnlocked,
+    InternetBlocked,
+    InternetUnblocked,
     FileSent,
     BrowseOpened,
     BrowseListed,
@@ -83,6 +85,8 @@ impl AuditKind {
             Self::BrowseOpened => "browse_opened",
             Self::BrowseListed => "browse_listed",
             Self::FileDownloaded => "file_downloaded",
+            Self::InternetBlocked => "internet_blocked",
+            Self::InternetUnblocked => "internet_unblocked",
         }
     }
 }

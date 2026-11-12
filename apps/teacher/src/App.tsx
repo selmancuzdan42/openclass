@@ -30,6 +30,7 @@ import {
   Sun,
   UserRoundCog,
   Wifi,
+  WifiOff,
 } from "lucide-react";
 
 import { api, AUDIT_LABELS, formatTime } from "./api";
@@ -621,6 +622,36 @@ function Console() {
           {
             caption: "Sistem",
             commands: [
+              {
+                label: "İnterneti Kes",
+                icon: <WifiOff size={18} />,
+                disabled: actionTargets.length === 0,
+                title:
+                  actionTargets.length === 0
+                    ? "Öğrenci seçin"
+                    : "Seçili öğrencilerin internete çıkışını keser (öğretmen bağlantısı açık kalır)",
+                onClick: () =>
+                  void (async () => {
+                    const ids = actionTargets.map((d) => d.deviceId);
+                    const n = await guard(api.blockInternet(ids, true));
+                    if (n !== undefined) show("success", `${n} öğrencinin interneti kesildi.`);
+                  })(),
+              },
+              {
+                label: "İnterneti Aç",
+                icon: <Wifi size={18} />,
+                disabled: actionTargets.length === 0,
+                title:
+                  actionTargets.length === 0
+                    ? "Öğrenci seçin"
+                    : "Seçili öğrencilerin internetini geri açar",
+                onClick: () =>
+                  void (async () => {
+                    const ids = actionTargets.map((d) => d.deviceId);
+                    const n = await guard(api.blockInternet(ids, false));
+                    if (n !== undefined) show("success", `${n} öğrencinin interneti açıldı.`);
+                  })(),
+              },
               {
                 label: "Ayarlar",
                 icon: <SettingsIcon size={18} />,

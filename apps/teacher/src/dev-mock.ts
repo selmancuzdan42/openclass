@@ -124,6 +124,7 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   focus_device: () => null,
   unfocus_devices: () => null,
   send_notice: (args) => (args.deviceIds as string[]).length,
+  block_internet: (args) => (args.deviceIds as string[]).length,
   clear_help_request: () => null,
   revoke_device: () => null,
   authorize_device: () => null,

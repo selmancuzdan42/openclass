@@ -16,6 +16,7 @@ mod identity;
 mod input;
 mod lock;
 mod net;
+mod netblock;
 mod state;
 mod testing;
 mod transfer;

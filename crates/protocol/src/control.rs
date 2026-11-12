@@ -272,6 +272,17 @@ pub enum ClientMessage {
     /// Yardım talebinin öğrenci tarafından geri çekilmesi.
     HelpCancel,
 
+    /// `ServerMessage::InternetBlock` sonucu.
+    ///
+    /// Öğrenci engeli uygulayıp uygulayamadığını bildirir. Admin yetkisi
+    /// yoksa ya da kural eklenemezse `ok=false` gelir.
+    InternetBlockAck {
+        /// Engelin şu an aktif olup olmadığı (başarılı işlem sonrası durum).
+        blocked: bool,
+        /// `false` ise neden uygulanamadığı.
+        detail: Option<String>,
+    },
+
     /// Dosya teklifi kabul edildi; parçalar beklenebilir.
     FileAccepted {
         transfer_id: Uuid,
@@ -469,6 +480,16 @@ pub enum ServerMessage {
 
     /// Kilidi kaldırır.
     UnlockStudent,
+
+    /// Öğrencinin internete çıkışını keser veya açar.
+    ///
+    /// Öğretmen bağlantısı (aynı LAN) **dokunulmaz**: yalnızca internet
+    /// yönlendirmesi engellenir, yönetim kanalı açık kalır. Böylece öğretmen
+    /// engeli uzaktan geri açabilir — NetSupport'un "İnterneti kes" davranışı.
+    InternetBlock {
+        /// `true` interneti keser, `false` geri açar.
+        block: bool,
+    },
 
     /// Dosya gönderme teklifi.
     ///
