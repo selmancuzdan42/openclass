@@ -157,7 +157,11 @@ fn probe_targets(state: &AppState) -> Vec<SocketAddr> {
 
         // Aralık mı? `192.168.1.10-40` → .10'dan .40'a kadar.
         if let Some(aralik) = expand_ipv4_range(&host) {
-            targets.extend(aralik.into_iter().map(|ip| SocketAddr::new(ip.into(), target_port)));
+            targets.extend(
+                aralik
+                    .into_iter()
+                    .map(|ip| SocketAddr::new(ip.into(), target_port)),
+            );
             continue;
         }
 

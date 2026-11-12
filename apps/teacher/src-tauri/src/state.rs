@@ -83,7 +83,6 @@ pub struct DeviceView {
     pub room: Option<String>,
 }
 
-
 /// Ekranda gösterilen, kısa ömürlü eşleştirme kodu.
 pub struct ActivePairing {
     pub code: String,
@@ -482,7 +481,6 @@ impl AppState {
             self.transfers.read().values().cloned().collect();
         self.emit("transfers-changed", list);
     }
-
 
     /// Arayüze olay yayar. Pencere henüz yoksa sessizce atlanır.
     pub fn emit<T: serde::Serialize + Clone>(&self, event: &str, payload: T) {

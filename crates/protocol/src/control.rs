@@ -904,8 +904,8 @@ mod arayuz_bicimi_testleri {
             "app_version": "0.1.0",
             "public_key": vec![0u8; 32],
         });
-        let msg: ClientMessage = serde_json::from_value(eski_ajan)
-            .expect("oda alanı olmayan Hello çözülebilmeli");
+        let msg: ClientMessage =
+            serde_json::from_value(eski_ajan).expect("oda alanı olmayan Hello çözülebilmeli");
         match msg {
             ClientMessage::Hello { room, hostname, .. } => {
                 assert_eq!(room, None, "alan yoksa oda bilinmiyor olmalı");

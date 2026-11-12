@@ -221,7 +221,10 @@ async fn handle_connection(
         drop(previous);
     }
 
-    state.db.touch_device(device_id, &hostname, room.as_deref()).ok();
+    state
+        .db
+        .touch_device(device_id, &hostname, room.as_deref())
+        .ok();
     state
         .db
         .audit(AuditKind::DeviceConnected, Some(device_id), Some(&hostname));
@@ -421,15 +424,12 @@ async fn authenticate(
             .map(|r| r.trim().to_ascii_uppercase());
         drop(cfg);
 
-        let room_norm = room
-            .as_ref()
-            .map(|r| r.to_ascii_uppercase());
+        let room_norm = room.as_ref().map(|r| r.to_ascii_uppercase());
         let room_matches = room_norm
             .as_ref()
             .zip(active_room.as_ref())
             .is_some_and(|(r, a)| !a.is_empty() && r == a);
-        let is_lab_host =
-            hostname.starts_with("LAB") || hostname.starts_with("BLAB");
+        let is_lab_host = hostname.starts_with("LAB") || hostname.starts_with("BLAB");
         if is_lab_host || room_matches {
             state
                 .db

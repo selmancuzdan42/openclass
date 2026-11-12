@@ -109,10 +109,7 @@ pub async fn revoke_device(state: State<'_, Arc<AppState>>, device_id: String) -
 /// kuyrukta yoksa öğrenci henüz Hello atmamış ya da cihaz zaten kayıtlı
 /// demektir; bu durumda işlem başarısız sayılır.
 #[tauri::command]
-pub fn authorize_device(
-    state: State<'_, Arc<AppState>>,
-    device_id: String,
-) -> CmdResult<()> {
+pub fn authorize_device(state: State<'_, Arc<AppState>>, device_id: String) -> CmdResult<()> {
     let id = parse_id(&device_id)?;
 
     let Some(public_key) = state.registry.take_waiting_key(id) else {
@@ -199,7 +196,6 @@ pub fn get_pairing(state: State<'_, Arc<AppState>>) -> CmdResult<Option<PairingI
         failed_attempts: active.failed_attempts,
     }))
 }
-
 
 // ----------------------------------------------------------- ekran yayını
 
@@ -969,7 +965,6 @@ pub async fn lock_devices(
     device_ids: Vec<String>,
     message: String,
 ) -> CmdResult<usize> {
-
     let message = message.trim().to_string();
     let mut sent = 0usize;
     for raw in &device_ids {
@@ -1105,10 +1100,7 @@ pub async fn start_key_monitor(
 
 /// Seçili öğrencinin klavye izlemesini durdurur.
 #[tauri::command]
-pub async fn stop_key_monitor(
-    state: State<'_, Arc<AppState>>,
-    device_id: String,
-) -> CmdResult<()> {
+pub async fn stop_key_monitor(state: State<'_, Arc<AppState>>, device_id: String) -> CmdResult<()> {
     let id = parse_id(&device_id)?;
     let Some(tx) = state.registry.sender(id) else {
         return Err("Cihaz bağlı değil.".into());
@@ -1155,9 +1147,14 @@ pub fn send_file(
         _ => FileDestination::Documents,
     };
 
-    let (transfer_id, name, size) =
-        crate::transfer::send(Arc::clone(&state), path.into(), targets, destination, subpath)
-            .map_err(|e| format!("{e}"))?;
+    let (transfer_id, name, size) = crate::transfer::send(
+        Arc::clone(&state),
+        path.into(),
+        targets,
+        destination,
+        subpath,
+    )
+    .map_err(|e| format!("{e}"))?;
 
     tracing::info!(
         %transfer_id, %name, size, hedef = destination.label(),
@@ -1346,15 +1343,12 @@ pub fn get_browse(state: State<'_, Arc<AppState>>) -> CmdResult<Option<crate::br
 
 /// İndirilen dosyaların klasörünü işletim sisteminde açar.
 #[tauri::command]
-pub fn open_downloads_dir(
-    app: tauri::AppHandle,
-    state: State<'_, Arc<AppState>>,
-) -> CmdResult<()> {
+pub fn open_downloads_dir(app: tauri::AppHandle, state: State<'_, Arc<AppState>>) -> CmdResult<()> {
     use tauri_plugin_opener::OpenerExt;
 
     let kok = state.download_root.read().clone();
-    let dir = crate::browse::downloads_dir(kok.as_deref())
-        .map_err(|e| fail("Klasör bulunamadı", e))?;
+    let dir =
+        crate::browse::downloads_dir(kok.as_deref()).map_err(|e| fail("Klasör bulunamadı", e))?;
     app.opener()
         .open_path(dir.to_string_lossy().to_string(), None::<&str>)
         .map_err(|e| format!("Klasör açılamadı: {e}"))
@@ -1388,8 +1382,7 @@ pub fn set_download_root(
             // Yazılabilirlik sınaması: salt okunur bir klasör seçilirse
             // indirme ilk parçada değil, burada hata verir.
             let deneme = yol.join(".openclass-yazma-denemesi");
-            std::fs::write(&deneme, b"")
-                .map_err(|e| format!("Bu klasöre yazılamıyor: {e}"))?;
+            std::fs::write(&deneme, b"").map_err(|e| format!("Bu klasöre yazılamıyor: {e}"))?;
             let _ = std::fs::remove_file(&deneme);
 
             let gosterim = yol.to_string_lossy().into_owned();
@@ -1399,8 +1392,8 @@ pub fn set_download_root(
         }
         _ => {
             *state.download_root.write() = None;
-            let dir = crate::browse::downloads_dir(None)
-                .map_err(|e| fail("Klasör bulunamadı", e))?;
+            let dir =
+                crate::browse::downloads_dir(None).map_err(|e| fail("Klasör bulunamadı", e))?;
             tracing::info!("indirme klasörü varsayılana döndü");
             Ok(dir.to_string_lossy().into_owned())
         }

@@ -279,12 +279,7 @@ impl Db {
     /// `room` `None` geldiğinde kayıtlı oda **korunur**: alanı göndermeyen
     /// eski sürüm bir ajanın bağlanması, öğretmenin elindeki oda bilgisini
     /// silmemelidir.
-    pub fn touch_device(
-        &self,
-        device_id: Uuid,
-        hostname: &str,
-        room: Option<&str>,
-    ) -> Result<()> {
+    pub fn touch_device(&self, device_id: Uuid, hostname: &str, room: Option<&str>) -> Result<()> {
         self.conn.lock().execute(
             "UPDATE devices
                 SET last_seen = ?2, hostname = ?3, room = COALESCE(?4, room)
@@ -422,7 +417,8 @@ mod tests {
     fn eslestirilen_cihaz_kaydedilir_ve_okunur() {
         let db = Db::open_in_memory().unwrap();
         let id = Uuid::new_v4();
-        db.upsert_paired_device(id, "LAB101", &[1u8; 32], None).unwrap();
+        db.upsert_paired_device(id, "LAB101", &[1u8; 32], None)
+            .unwrap();
 
         let rec = db.device(id).unwrap().unwrap();
         assert_eq!(rec.hostname, "LAB101");
@@ -434,8 +430,10 @@ mod tests {
     fn yeniden_eslestirme_acik_anahtari_gunceller() {
         let db = Db::open_in_memory().unwrap();
         let id = Uuid::new_v4();
-        db.upsert_paired_device(id, "LAB101", &[1u8; 32], None).unwrap();
-        db.upsert_paired_device(id, "LAB105", &[2u8; 32], None).unwrap();
+        db.upsert_paired_device(id, "LAB101", &[1u8; 32], None)
+            .unwrap();
+        db.upsert_paired_device(id, "LAB105", &[2u8; 32], None)
+            .unwrap();
 
         let rec = db.device(id).unwrap().unwrap();
         assert_eq!(rec.public_key, [2u8; 32]);
@@ -451,7 +449,8 @@ mod tests {
     fn yetki_kaldirilan_cihaz_reddedilmis_olur() {
         let db = Db::open_in_memory().unwrap();
         let id = Uuid::new_v4();
-        db.upsert_paired_device(id, "LAB101", &[1u8; 32], None).unwrap();
+        db.upsert_paired_device(id, "LAB101", &[1u8; 32], None)
+            .unwrap();
         db.revoke_device(id).unwrap();
         assert_eq!(
             db.device(id).unwrap().unwrap().status,
@@ -481,7 +480,6 @@ mod tests {
         assert_eq!(entries[0].kind, "notice_sent");
         assert_eq!(entries[1].device_id, Some(id));
     }
-
 
     #[test]
     fn bozuk_satir_tum_sorguyu_dusurmez() {
@@ -651,7 +649,10 @@ mod tests {
         // Eşleştirme sırasında oda gelir.
         db.upsert_paired_device(id, "LAB101", &[1u8; 32], Some("Lab 1"))
             .unwrap();
-        assert_eq!(db.device(id).unwrap().unwrap().room.as_deref(), Some("Lab 1"));
+        assert_eq!(
+            db.device(id).unwrap().unwrap().room.as_deref(),
+            Some("Lab 1")
+        );
 
         // Oda adını göndermeyen (0.1.0) bir ajan bağlanırsa kayıtlı oda
         // KORUNUR. Aksi halde eski bir ajanın tek bağlantısı öğretmenin
@@ -665,7 +666,10 @@ mod tests {
 
         // Yeni oda adı gelirse güncellenir.
         db.touch_device(id, "LAB101", Some("Lab 2")).unwrap();
-        assert_eq!(db.device(id).unwrap().unwrap().room.as_deref(), Some("Lab 2"));
+        assert_eq!(
+            db.device(id).unwrap().unwrap().room.as_deref(),
+            Some("Lab 2")
+        );
 
         // Yeniden eşleşmede de aynı kural geçerli.
         db.upsert_paired_device(id, "LAB101", &[1u8; 32], None)
@@ -700,10 +704,7 @@ mod tests {
         let cihazlar = db.all_devices().expect("cihazlar okunabilmeli");
         eprintln!("geçiş sonrası {} cihaz:", cihazlar.len());
         for c in &cihazlar {
-            eprintln!(
-                "  {} | yetki={:?} | oda={:?}",
-                c.hostname, c.status, c.room
-            );
+            eprintln!("  {} | yetki={:?} | oda={:?}", c.hostname, c.status, c.room);
         }
 
         let surum: i64 = db
