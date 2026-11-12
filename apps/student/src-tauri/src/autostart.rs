@@ -81,7 +81,7 @@ pub fn notify_graceful_exit() {
 
 #[cfg(windows)]
 mod platform {
-    use super::VALUE_NAME;
+    use super::{VALUE_NAME, WATCHDOG_ARG};
     use anyhow::{bail, Result};
     use windows_sys::Win32::Foundation::ERROR_SUCCESS;
     use windows_sys::Win32::System::Registry::{

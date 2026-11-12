@@ -1323,7 +1323,7 @@ fn unix_now() -> i64 {
 /// bu hak genelde mevcut olur. Yetki yoksa çağrı sessizce başarısız kalır.
 #[cfg(windows)]
 fn shutdown_computer_windows() {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
+    use windows_sys::Win32::System::Shutdown::{
         EWX_FORCE, EWX_POWEROFF, EWX_SHUTDOWN, ExitWindowsEx,
     };
     let status =
