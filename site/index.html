@@ -1,25 +1,43 @@
 <!DOCTYPE html>
-<html lang="tr" data-theme="light">
+<html lang="tr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OpenClass — bilgisayar laboratuvarını tek ekrandan yönet</title>
-<meta name="description" content="NetSupport School'a ücretsiz ve açık kaynak alternatif. Öğretmen, yerel ağdaki öğrenci ekranlarını izler, kontrol eder, kilitler ve dosya gönderir. Sunucu, internet ve abonelik yok.">
+<meta name="description" content="NetSupport School'a ücretsiz ve açık kaynak alternatif. Öğretmen, yerel ağdaki öğrenci ekranlarını izler, kontrol eder, kilitler, dosya gönderir, interneti keser. Sunucu, internet ve abonelik yok.">
 <link rel="icon" href="assets/openclass-logo.svg">
 <meta property="og:title" content="OpenClass — laboratuvarını tek ekrandan yönet">
 <meta property="og:description" content="Açık kaynak sınıf yönetimi. Yerel ağda çalışır, sunucu ve abonelik yok.">
 <meta property="og:image" content="assets/ogretmen-konsolu-acik.png">
 <style>
 :root {
-  --bg: #fafafa;
-  --surface: #ffffff;
-  --stroke: #e5e7eb;
-  --ink: #111827;
-  --ink-2: #4b5563;
-  --accent: #1d4ed8;
-  --accent-soft: #eef2ff;
-  --maxw: 960px;
+  --bg: #0b0f14;
+  --surface: #11161d;
+  --surface-2: #141b24;
+  --stroke: #24303e;
+  --ink: #e8edf3;
+  --ink-2: #94a3b3;
+  --ink-3: #64748b;
+  --accent: #5b9bff;
+  --accent-2: #7ab5ff;
+  --accent-soft: #152c3f;
+  --ok: #4ade80;
+  --maxw: 1040px;
+  --r: 12px;
   --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+:root[data-theme="light"] {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --stroke: #e2e8f0;
+  --ink: #0f172a;
+  --ink-2: #475569;
+  --ink-3: #94a3b8;
+  --accent: #1d4ed8;
+  --accent-2: #2563eb;
+  --accent-soft: #eff6ff;
+  --ok: #16a34a;
 }
 * { box-sizing: border-box; margin: 0; }
 html { scroll-behavior: smooth; }
@@ -32,68 +50,117 @@ body {
   text-wrap: pretty;
 }
 .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
-a { color: var(--accent); text-decoration: none; }
+a { color: var(--accent-2); text-decoration: none; }
 a:hover { text-decoration: underline; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+img { max-width: 100%; height: auto; display: block; }
 
 /* Üst çubuk */
-header.top { border-bottom: 1px solid var(--stroke); background: var(--surface); }
-.top .wrap { display: flex; align-items: center; height: 60px; }
+header.top { position: sticky; top: 0; z-index: 40; border-bottom: 1px solid var(--stroke); background: color-mix(in srgb, var(--surface) 85%, transparent); backdrop-filter: blur(10px); }
+.top .wrap { display: flex; align-items: center; height: 58px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; color: var(--ink); }
 .brand:hover { text-decoration: none; }
-.brand img { width: 28px; height: 28px; }
-nav { margin-left: auto; display: flex; gap: 22px; font-size: 14px; color: var(--ink-2); }
-@media (max-width: 520px) { nav { gap: 14px; } }
+.brand img { width: 27px; height: 27px; }
+nav { margin-left: auto; display: flex; align-items: center; gap: 22px; font-size: 14px; color: var(--ink-2); }
+nav a { color: var(--ink-2); }
+nav a:hover { color: var(--ink); text-decoration: none; }
+.theme-toggle {
+  background: none; border: 1px solid var(--stroke); border-radius: 8px;
+  color: var(--ink-2); font-family: inherit; font-size: 15px;
+  width: 32px; height: 32px; cursor: pointer; display: grid; place-items: center;
+}
+.theme-toggle:hover { color: var(--ink); border-color: var(--accent); }
+@media (max-width: 560px) { nav { gap: 14px; } nav a.hide-sm { display: none; } }
 
 /* Hero */
-.hero { background: var(--surface); border-bottom: 1px solid var(--stroke); padding: 72px 0 60px; text-align: center; }
-.eyebrow { font: 600 12px/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin-bottom: 20px; }
-h1 { font-size: clamp(32px, 5.5vw, 46px); line-height: 1.1; letter-spacing: -.02em; font-weight: 720; max-width: 22ch; margin: 0 auto 16px; }
-.lede { font-size: 18px; color: var(--ink-2); max-width: 52ch; margin: 0 auto 32px; }
+.hero { padding: 80px 0 56px; text-align: center; }
+.eyebrow { font: 600 12px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--accent-2); margin-bottom: 22px; }
+h1 { font-size: clamp(34px, 5.6vw, 50px); line-height: 1.08; letter-spacing: -.03em; font-weight: 740; max-width: 20ch; margin: 0 auto 18px; }
+.lede { font-size: 18px; color: var(--ink-2); max-width: 56ch; margin: 0 auto 30px; }
+.lede strong { color: var(--accent-2); font-weight: 600; }
 .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
 .btn {
-  display: inline-block; padding: 12px 22px; border-radius: 8px;
+  display: inline-block; padding: 12px 24px; border-radius: 10px;
   font-family: inherit; font-size: 15px; font-weight: 600; cursor: pointer; text-decoration: none;
 }
 .btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover { text-decoration: none; filter: brightness(1.08); }
+.btn-primary:hover { text-decoration: none; filter: brightness(1.1); }
 .btn-ghost { background: var(--surface); color: var(--ink); border: 1px solid var(--stroke); }
 .btn-ghost:hover { background: var(--accent-soft); text-decoration: none; }
 
+/* Rozetler */
+.badges { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 34px 0 0; }
+.badge {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 1px solid var(--stroke); background: var(--surface);
+  border-radius: 99px; padding: 8px 14px; font-size: 13px; color: var(--ink-2);
+}
+.badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+
 /* Ekran görüntüsü */
-.shot { padding: 40px 0 10px; }
+.shot { padding: 8px 0 6px; }
 .shot img {
-  display: block;
-  max-width: 100%;
-  height: auto;
-  border-radius: 10px; border: 1px solid var(--stroke);
-  box-shadow: 0 20px 50px -20px rgba(0,0,0,.25);
+  border-radius: var(--r); border: 1px solid var(--stroke);
+  box-shadow: 0 24px 60px -24px rgba(0,0,0,.6);
   margin: 0 auto;
 }
 
-/* Tanıtım blokları */
-section.block { padding: 60px 0; border-bottom: 1px solid var(--stroke); }
-section.block:last-child { border-bottom: none; }
-.block h2 { font-size: 26px; letter-spacing: -.015em; font-weight: 700; margin-bottom: 14px; }
-.block .sub { color: var(--ink-2); max-width: 58ch; margin-bottom: 26px; }
-.features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
-@media (max-width: 640px) { .features { grid-template-columns: 1fr; } }
-.feature {
-  background: var(--surface); border: 1px solid var(--stroke); border-radius: 10px;
-  padding: 18px 18px; display: flex; flex-direction: column; gap: 4px;
-}
-.feature strong { font-size: 15px; }
+/* Bölüm */
+section.block { padding: 70px 0; border-bottom: 1px solid var(--stroke); }
+section.block:last-of-type { border-bottom: none; }
+.block h2 { font-size: 28px; letter-spacing: -.02em; font-weight: 720; margin-bottom: 12px; }
+.block .kicker { font: 600 12px/1 var(--sans); letter-spacing: .11em; text-transform: uppercase; color: var(--accent-2); margin-bottom: 12px; }
+.block .sub { color: var(--ink-2); max-width: 60ch; margin-bottom: 30px; }
+
+/* Özellikler */
+.features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+@media (max-width: 900px) { .features { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .features { grid-template-columns: 1fr; } }
+.feature { background: var(--surface); border: 1px solid var(--stroke); border-radius: var(--r); padding: 20px; display: flex; flex-direction: column; gap: 5px; }
+.feature .ic { font-size: 22px; line-height: 1; margin-bottom: 6px; }
+.feature strong { font-size: 15.5px; }
 .feature span { font-size: 13.5px; color: var(--ink-2); }
 
+/* Nasıl çalışır */
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; counter-reset: step; }
+@media (max-width: 760px) { .steps { grid-template-columns: 1fr; } }
+.step { background: var(--surface); border: 1px solid var(--stroke); border-radius: var(--r); padding: 22px; }
+.step .n { display: block; font: 700 22px/1 var(--sans); color: var(--accent); margin-bottom: 10px; }
+.step strong { font-size: 15.5px; display: block; margin-bottom: 4px; }
+.step span { font-size: 13.5px; color: var(--ink-2); }
+
+/* Galeri */
+.gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 760px) { .gallery { grid-template-columns: 1fr; } }
+.gallery figure { margin: 0; }
+.gallery img { border-radius: var(--r); border: 1px solid var(--stroke); box-shadow: 0 18px 40px -22px rgba(0,0,0,.5); }
+.gallery figcaption { font-size: 13px; color: var(--ink-2); margin-top: 8px; text-align: center; }
+
 /* İndir */
-.dl { background: var(--accent-soft); border-radius: 12px; padding: 28px; text-align: center; }
-.dl h3 { font-size: 20px; margin-bottom: 8px; }
-.dl p { color: var(--ink-2); margin-bottom: 18px; }
+.dl { background: var(--accent-soft); border: 1px solid var(--stroke); border-radius: 16px; padding: 40px 28px; text-align: center; }
+.dl h3 { font-size: 22px; margin-bottom: 10px; }
+.dl p { color: var(--ink-2); max-width: 52ch; margin: 0 auto 22px; }
+.dl .ver { font: 500 13px/1 var(--sans); color: var(--ink-2); border: 1px solid var(--stroke); border-radius: 99px; padding: 6px 12px; display: inline-block; margin-bottom: 18px; }
 
 /* Alt bilgi */
-footer { padding: 28px 0 40px; color: var(--ink-2); font-size: 13.5px; }
-footer .wrap { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+footer { padding: 32px 0 44px; color: var(--ink-3); font-size: 13.5px; }
+footer .wrap { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; }
 footer .ml { margin-left: auto; }
+
+/* Kaydırma animasyonu */
+.reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity .55s ease, transform .55s ease;
+  will-change: opacity, transform;
+}
+.reveal.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+}
+.style-1 { transition-delay: .04s; }
+.style-2 { transition-delay: .12s; }
+.style-3 { transition-delay: .20s; }
 </style>
 </head>
 <body>
@@ -106,8 +173,10 @@ footer .ml { margin-left: auto; }
     </a>
     <nav>
       <a href="#ozellikler">Özellikler</a>
+      <a href="#nasil" class="hide-sm">Nasıl çalışır</a>
+      <a href="#galeri" class="hide-sm">Galeri</a>
       <a href="#indir">İndir</a>
-      <a href="#hakkimda">Hakkında</a>
+      <button class="theme-toggle" id="themeBtn" title="Açık / koyu tema" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">◐</button>
     </nav>
   </div>
 </header>
@@ -116,10 +185,16 @@ footer .ml { margin-left: auto; }
   <div class="wrap">
     <p class="eyebrow">Bilgisayar laboratuvarları için · Açık kaynak</p>
     <h1>Laboratuvardaki her ekran, öğretmenin masasında.</h1>
-    <p class="lede">OpenClass, NetSupport School'a ücretsiz ve açık kaynak bir alternatif. Öğretmen, yerel ağdaki öğrenci bilgisayarlarını tek pencereden izler, kontrol eder ve yönetir — sunucu, internet veya abonelik olmadan.</p>
+    <p class="lede">OpenClass, NetSupport School'a ücretsiz ve açık kaynak bir alternatif. Öğretmen, yerel ağdaki öğrenci bilgisayarlarını tek pencereden <strong>izler</strong>, <strong>kontrol eder</strong> ve <strong>yönetir</strong> — sunucu, internet veya abonelik olmadan.</p>
     <div class="cta">
       <a class="btn btn-primary" href="#indir">Ücretsiz indir</a>
       <a class="btn btn-ghost" href="#ozellikler">Özellikleri gör</a>
+    </div>
+    <div class="badges">
+      <span class="badge"><span class="dot"></span> Windows · kurulumsuz</span>
+      <span class="badge"><span class="dot"></span> Yerel ağ · sunucu yok</span>
+      <span class="badge"><span class="dot"></span> GPL-3.0 · tamamen açık</span>
+      <span class="badge"><span class="dot"></span> Gizli izleme yok</span>
     </div>
   </div>
 </div>
@@ -132,17 +207,58 @@ footer .ml { margin-left: auto; }
 
 <section class="block" id="ozellikler">
   <div class="wrap">
+    <p class="kicker">Özellikler</p>
     <h2>Ders boyunca yanınızda olan tüm kontroller</h2>
     <p class="sub">İki küçük uygulama: öğretmen konsolu ve öğrenci ajanı. Yerel ağda otomatik birbirini bulur, güvenli biçimde bağlanır.</p>
     <div class="features">
-      <div class="feature"><strong>Ekran izleme</strong><span>Öğrencilerin ekranlarını canlı görün, küçük veya büyük.</span></div>
-      <div class="feature"><strong>Uzaktan kontrol</strong><span>İhtiyaç olduğunda öğrencinin bilgisayarını siz yönetin.</span></div>
-      <div class="feature"><strong>Ekran kilidi</strong><span>Dersi kesmeden, tek tıkla ekranları geçici kilitler.</span></div>
-      <div class="feature"><strong>İnternet engelleme</strong><span>Öğrencinin internete çıkışını kesin, öğretmen bağlantısı açık kalsın.</span></div>
-      <div class="feature"><strong>Dosya gönderme / alma</strong><span>Ders notlarını toplu dağıtın, ödevleri toplayın — Windows Gezgini ile.</span></div>
-      <div class="feature"><strong>Klavye izleme</strong><span>Öğrencinin ne yazdığını görün (şeffaf — öğrenciye gösterilir).</span></div>
-      <div class="feature"><strong>Yardım talepleri</strong><span>Öğrenciler sizden anında destek istesin.</span></div>
-      <div class="feature"><strong>Gösterim</strong><span>Kendi ekranınızı öğrencilere tam ekran yayınlayın.</span></div>
+      <div class="feature"><span class="ic">🖥️</span><strong>Ekran izleme</strong><span>Öğrencilerin ekranlarını canlı görün — küçük küçük veya tek tek büyük.</span></div>
+      <div class="feature"><span class="ic">🖱️</span><strong>Uzaktan kontrol</strong><span>İhtiyaç olduğunda öğrencinin bilgisayarını siz yönetin.</span></div>
+      <div class="feature"><span class="ic">🔒</span><strong>Ekran kilidi</strong><span>Dersi kesmeden, tek tıkla ekranları geçici olarak kilitleyin.</span></div>
+      <div class="feature"><span class="ic">📡</span><strong>İnternet engelleme</strong><span>Öğrencinin internete çıkışını kesin — öğretmen bağlantısı hep açık kalır.</span></div>
+      <div class="feature"><span class="ic">🗂️</span><strong>Dosya gönderme / alma</strong><span>Ders notlarını toplu dağıtın, ödevleri toplayın — Windows Gezgini ile.</span></div>
+      <div class="feature"><span class="ic">⌨️</span><strong>Klavye izleme</strong><span>Öğrencinin ne yazdığını görün — şeffaf, öğrenciye gösterilir.</span></div>
+      <div class="feature"><span class="ic">🙋</span><strong>Yardım talepleri</strong><span>Öğrenciler tek tıkla sizden anında destek istesin.</span></div>
+      <div class="feature"><span class="ic">📤</span><strong>Gösterim</strong><span>Kendi ekranınızı öğrencilere tam ekran yayınlayın.</span></div>
+      <div class="feature"><span class="ic">🛡️</span><strong>Güvenli bağlantı</strong><span>Cihaz kimlikleri ve imzalı el sıkışma — taklit edilemez.</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="nasil">
+  <div class="wrap">
+    <p class="kicker">Nasıl çalışır</p>
+    <h2>Kur, bağlan, yönet</h2>
+    <p class="sub">Hepsi okulun kendi yerel ağında — kurulum dosyası, bulut hesabı veya lisans anahtarı yok.</p>
+    <div class="steps">
+      <div class="step"><span class="n">1</span><strong>Öğretmeni açın</strong><span>Konsol, ağdaki laboratuvarı otomatik tarar ve öğrencileri bulur.</span></div>
+      <div class="step"><span class="n">2</span><strong>Otomatik bağlanın</strong><span>LAB/BLAB önekli cihazlar kod sormadan güvenli biçimde katılır.</span></div>
+      <div class="step"><span class="n">3</span><strong>Dersi yönetin</strong><span>İzleyin, kilitleyin, interneti kesin, dosya gönderin — hepsi tek pencereden.</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="galeri">
+  <div class="wrap">
+    <p class="kicker">Arayüz</p>
+    <h2>Açık ve koyu tema</h2>
+    <p class="sub">Öğretmen konsolu hem gündüz derslerine hem karanlık ortamlara uyum sağlar.</p>
+    <div class="gallery">
+      <figure>
+        <img src="assets/ogretmen-konsolu-acik.png" alt="OpenClass açık tema — öğretmen konsolu">
+        <figcaption>Açık tema — küçük resim görünümü</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/ogretmen-konsolu-koyu.png" alt="OpenClass koyu tema — öğretmen konsolu">
+        <figcaption>Koyu tema — tablet görünümü</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/ogretmen-ayrintili-liste.png" alt="Öğrenci listesi ayrıntılı görünüm">
+        <figcaption>Ayrıntılı liste görünümü</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/ogrenci-yapilandirma.png" alt="Öğrenci tarafı yapılandırma">
+        <figcaption>Öğrenci ajanı — yapılandırma</figcaption>
+      </figure>
     </div>
   </div>
 </section>
@@ -150,17 +266,19 @@ footer .ml { margin-left: auto; }
 <section class="block" id="indir">
   <div class="wrap">
     <div class="dl">
+      <span class="ver">v0.3.0 — en son sürüm</span>
       <h3>Ücretsiz ve açık kaynak</h3>
       <p>Windows için hazır kurulumsuz programlar. Sunucu kurulumu, hesap ve abonelik yok.</p>
-      <a class="btn btn-primary" href="#indir">GitHub'dan indir</a>
+      <a class="btn btn-primary" href="https://github.com/selmancuzdan42/openclass/releases">GitHub'dan indir</a>
     </div>
   </div>
 </section>
 
 <section class="block" id="hakkimda">
   <div class="wrap">
+    <p class="kicker">Hakkında</p>
     <h2>Neden OpenClass?</h2>
-    <p class="sub">Okullar sınıf yönetimi için pahalı ve kapalı lisanslara mahkûm olmasın. OpenClass, gizli izleme olmadan, yalnızca sınıfın işini gören kontrolleri sunar: ekran paylaşımı her zaman öğrenciye görünürdür, klavye izleme şeffaftır. Yerel ağda çalıştığı için internet bağlantısına ve harici hizmetlere bağımlı değildir.</p>
+    <p class="sub">Okullar sınıf yönetimi için pahalı ve kapalı lisanslara mahkûm olmasın. OpenClass, gizli izleme olmadan yalnızca sınıfın işini gören kontrolleri sunar: ekran paylaşımı her zaman öğrenciye görünürdür, klavye izleme şeffaftır. Yerel ağda çalıştığı için internet bağlantısına ve harici hizmetlere bağımlı değildir.</p>
   </div>
 </section>
 

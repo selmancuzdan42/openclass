@@ -8,6 +8,7 @@ import {
   Hand,
   FileDown,
   FileUp,
+  Keyboard,
   LayoutGrid,
   Link2,
   ListChecks,
@@ -412,7 +413,10 @@ function Console() {
 
   async function openKeyMonitor() {
     const device = selectedDevices[0];
-    if (!device) return;
+    if (!device) {
+      show("error", "Klavye izleme için tek bir öğrenci seçin.");
+      return;
+    }
     setKeyMonitorDevice(device);
     setKeyEvents([]);
     setKeyMonitoring(false);
@@ -992,6 +996,20 @@ function Console() {
               </button>
             );
           })}
+          <button
+            onClick={openKeyMonitor}
+            className="flex h-[54px] flex-col items-center justify-center gap-1
+              rounded text-[10.5px] text-[var(--color-text-2)] transition-colors
+              hover:bg-[var(--color-surface-3)]"
+            title={
+              selectedDevices.length === 1
+                ? "Seçili öğrencinin klavyesini izle"
+                : "Klavye izleme (tek cihaz seçin)"
+            }
+          >
+            <Keyboard size={18} />
+            Klavye
+          </button>
         </nav>
 
         <main className="min-w-0 flex-1 bg-[var(--color-surface)]">
