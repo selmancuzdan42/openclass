@@ -142,28 +142,26 @@ h1 { font-size: clamp(34px, 5.6vw, 50px); line-height: 1.08; letter-spacing: -.0
 .browser .bar .addr { margin-left: 10px; flex: 1; font: 500 11px/1 var(--sans); color: var(--ink-3); background: var(--surface-2); border: 1px solid var(--stroke); border-radius: 6px; padding: 5px 10px; text-align: left; white-space: nowrap; overflow: hidden; }
 .browser img { display: block; width: 100%; height: auto; }
 
-/* Pencere üstüne binen canlı rozetler */
-.floats { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
-.float {
-  position: absolute; display: flex; align-items: center; gap: 6px;
-  font-size: 12px; font-weight: 600; color: var(--ink);
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  border: 1px solid var(--stroke); border-radius: 8px; padding: 6px 10px;
-  box-shadow: 0 10px 26px -12px rgba(0,0,0,.6);
-  backdrop-filter: blur(6px);
-  opacity: 0; transform: translateY(8px) scale(.96);
+/* Durum şeridi — görüntünün ALTINDA, kartların üstüne binmez */
+.statusbar {
+  display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+  max-width: min(100%, 980px); margin: 14px auto 0;
+}
+.st {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 1px solid var(--stroke); background: var(--surface);
+  border-radius: 9px; padding: 7px 12px; font-size: 12.5px; font-weight: 600; color: var(--ink);
+  opacity: 0; transform: translateY(8px);
   transition: opacity .5s cubic-bezier(.22,1,.36,1), transform .5s cubic-bezier(.22,1,.36,1);
 }
-.floats.shown .float { opacity: 1; transform: none; }
-.floats.shown .float.b1 { transition-delay: .1s; }
-.floats.shown .float.b2 { transition-delay: .25s; }
-.floats.shown .float.b3 { transition-delay: .4s; }
-.float .chk { color: var(--ok); font-size: 13px; }
-.float.b1 { top: 13%; left: 7%; }
-.float.b2 { top: 46%; right: 6%; }
-.float.b3 { bottom: 14%; left: 9%; }
-@media (prefers-reduced-motion: reduce) { .float { opacity: 1; transform: none; transition: none; } }
-@media (max-width: 640px) { .floats { display: none; } }
+.statusbar.shown .st { opacity: 1; transform: none; }
+.statusbar.shown .st.s1 { transition-delay: .35s; }
+.statusbar.shown .st.s2 { transition-delay: .55s; }
+.statusbar.shown .st.s3 { transition-delay: .75s; }
+.st .chk { color: var(--ok); font-size: 13px; }
+.st.off .chk { color: var(--accent); }
+.st.mon .chk { color: var(--warn, #fbbf24); }
+@media (prefers-reduced-motion: reduce) { .st { opacity: 1; transform: none; transition: none; } }
 
 
 /* Bölüm */
@@ -268,11 +266,11 @@ footer .ml { margin-left: auto; }
         <span class="addr">openclass.lab — öğretmen konsolu</span>
       </div>
       <img src="assets/ogretmen-konsolu-acik.png" alt="Öğretmen konsolu — öğrenci ekranları tek pencerede">
-      <div class="floats">
-        <span class="float b1"><span class="chk">✓</span> İnternet engellendi</span>
-        <span class="float b2"><span class="chk">✓</span> Ekran kilitlendi</span>
-        <span class="float b3"><span class="chk">✓</span> Klavye izleniyor</span>
-      </div>
+    </div>
+    <div class="statusbar" id="statusbar">
+      <span class="st off"><span class="chk">◉</span> İnternet engellendi</span>
+      <span class="st s2"><span class="chk">◉</span> Ekran kilitlendi</span>
+      <span class="st mon"><span class="chk">◉</span> Klavye izleniyor</span>
     </div>
   </div>
 </div>
@@ -435,13 +433,13 @@ footer .ml { margin-left: auto; }
   setTimeout(t, 200);
 })();
 
-// Pencere üstü canlı rozetler: benzer şekilde .shown verilince görünürler.
+// Görüntünün altındaki durum şeridi: .shown verilince sırayla belirir.
 (function () {
-  var floats = document.querySelector(".floats");
-  if (!floats) return;
-  var t = function () { floats.classList.add("shown"); };
+  var statusbar = document.querySelector("#statusbar");
+  if (!statusbar) return;
+  var t = function () { statusbar.classList.add("shown"); };
   if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) { t(); return; }
-  setTimeout(t, 900);
+  setTimeout(t, 600);
 })();
 </script>
 
