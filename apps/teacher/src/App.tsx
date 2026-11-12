@@ -547,8 +547,12 @@ function Console() {
               {
                 label: "Dosya Al",
                 icon: <FileDown size={18} />,
-                title: "Alınan dosyaların klasörünü Windows Gezgini'nde aç",
-                onClick: () => void guard(api.openDownloadsDir()),
+                disabled: actionTargets.length === 0,
+                title:
+                  actionTargets.length === 0
+                    ? "Öğrenci seçin"
+                    : "Seçili öğrencilerin bilgisayarından dosya toplar",
+                onClick: () => setCollectOpen(true),
               },
               {
                 label: "Gönderimler",
