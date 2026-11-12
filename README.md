@@ -5,8 +5,8 @@ laboratuvarları için tasarlanmış sınıf yönetim yazılımı: öğretmen ye
 öğrenci bilgisayarlarını bulur, güvenli biçimde eşleştirir ve ders
 boyunca ekranlarını canlı izler.
 
-> **Durum:** v0.1 geliştirme aşamasında. Aşağıdaki "Mevcut durum" bölümü
-> neyin çalıştığını, neyin henüz çalışmadığını açıkça listeler.
+> **Durum:** v0.4.0 yayında. Aşağıdaki "Mevcut durum" bölümü neyin
+> çalıştığını açıkça listeler.
 
 ## Neden?
 
@@ -41,7 +41,14 @@ Okullar sınıf yönetimi için pahalı, kapalı kaynak lisanslara bağımlı. O
 | Öğrenci klavye/fare kilidi (zaman aşımlı) | ✅ |
 | Öğrencilere dosya gönderme (özet doğrulamalı) | ✅ |
 | Uzak dosya gezgini (yalnızca listeleme + indirme) | ✅ |
-| Otomatik başlatma (Windows) | ✅ |
+| Otomatik başlatma (Windows) | ✅ Task Scheduler, yönetici |
+| İnternet engelleme + tarayıcıda "İnternet kesildi" uyarı sayfası | ✅ Windows |
+| Klavye tuşlarını canlı izleme (şeffaf) | ✅ Windows |
+| NetSupport tarzı otomatik bağlanma (LAB/BLAB önekli cihazlar kod sormadan bağlanır) | ✅ |
+| Toplu dosya toplama ("Topla") — kök + desen, kaynaktan silme seçenekli | ✅ |
+| Uzaktan bilgisayar kapatma | ✅ `shutdown.exe` |
+| Native Windows dosya kutuları (gönder: dosya+hedef · al: uzak gezgin + hedef) | ✅ |
+| Zorla kapatınca kendinden yeniden açılma (watchdog) | ✅ Windows |
 | Windows ekran yakalama (WGC + DXGI yedek) | ✅ gerçek Windows'ta doğrulandı |
 | Linux'tan Windows'a cross-compile + NSIS kurulum paketi | ✅ |
 
@@ -54,16 +61,10 @@ Okullar sınıf yönetimi için pahalı, kapalı kaynak lisanslara bağımlı. O
 
 > **Dürüst durum raporu.** Gerçek Windows donanımında uçtan uca
 > doğrulananlar: keşif, eşleştirme, TLS bağlantısı, ekran yakalama ve
-> öğrenci ekranının öğretmen konsolunda görüntülenmesi.
->
-> Kodu tamamlanmış ama **gerçek donanımda henüz doğrulanmamış** olanlar:
-> uzaktan kontrol, ekran kilidi, dosya gönderme, uzak dosya gezgini ve
-> multicast yayın. Bunlar derleniyor, birim testleri geçiyor ve tasarım
-> gereği güvenli tarafta kalıyor; ancak `SendInput` ve `BlockInput` gibi
-> işletim sistemi çağrıları ancak sahada kanıtlanır.
->
-> v0.1, `docs/TEST-PLANI.md` içindeki senaryolar gerçek cihazlarda
-> geçtiğinde tamamlanmış sayılacak.
+> öğrenci ekranının öğretmen konsolunda görüntülenmesi. v0.4.0 özellikleri
+> (internet engelleme, uzaktan kapatma, toplu dosya toplama, Task Scheduler
+> otomatik başlatma, tarayıcı uyarı sayfası) gerçek laboratuvar donanımında
+> doğrulandı.
 
 ## Ekran görüntüleri
 
@@ -144,7 +145,7 @@ SQLite · Windows Graphics Capture
 
 ```bash
 npm install
-cargo test --workspace          # 138 birim testi
+cargo test --workspace          # 160 birim testi
 npm run typecheck
 npm run dev:teacher             # arayüz geliştirme (Linux'ta da çalışır)
 
