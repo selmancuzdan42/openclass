@@ -27,6 +27,7 @@
 
 use anyhow::Result;
 use jpeg_encoder::{ColorType, Encoder};
+use rayon::prelude::*;
 
 use crate::encode::{scale_frame, PixelLayout, RawFrame};
 
@@ -159,25 +160,23 @@ impl TileEncoder {
             PixelLayout::Bgra8 => ColorType::Bgra,
         };
 
-        let mut rects = Vec::with_capacity(regions.len());
-        let mut bytes = 0usize;
-        let mut crop = Vec::new();
-
-        for (x, y, w, h) in regions {
-            crop_region(&scaled, x, y, w, h, &mut crop);
-            let mut jpeg = Vec::with_capacity(w as usize * h as usize / 4);
-            Encoder::new(&mut jpeg, quality.clamp(1, 100))
-                .encode(&crop, w as u16, h as u16, color)
-                .map_err(|err| anyhow::anyhow!("JPEG kodlaması başarısız: {err}"))?;
-            bytes += jpeg.len();
-            rects.push(EncodedRect {
-                x,
-                y,
-                width: w,
-                height: h,
-                jpeg,
-            });
-        }
+        // Az sayıda bölge varsa (tek metin satırı, küçük imleç) havuz görev
+        // çizelgeleme yükü kazançtan büyük olur; yalnızca yeterli iç iş parçası
+        // olduğunda paralelleştir. Eşik: çekirdek sayısı, en fazla 4.
+        let min_parallel = rayon::current_num_threads().clamp(1, 4);
+        let rects: Vec<EncodedRect> = if regions.len() >= min_parallel {
+            regions
+                .par_iter()
+                .map(|&(x, y, w, h)| encode_region(&scaled, color, quality, x, y, w, h))
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            regions
+                .iter()
+                .map(|&(x, y, w, h)| encode_region(&scaled, color, quality, x, y, w, h))
+                .collect::<Result<Vec<_>>>()?
+        };
+        // Her bölge kendi JPEG'ini üretir; çıktı sırası girdi sırasıyla aynıdır.
+        let bytes = rects.iter().map(|r| r.jpeg.len()).sum();
 
         self.primed = true;
         Ok(Some(ScreenUpdate {
@@ -306,6 +305,37 @@ fn crop_region(scaled: &crate::encode::Scaled, x: u32, y: u32, w: u32, h: u32, o
         let start = row as usize * stride + x as usize * 4;
         out.extend_from_slice(&scaled.pixels[start..start + row_len]);
     }
+}
+
+/// Tek bir bölgeyi bağımsız olarak JPEG'ler.
+///
+/// Yalnızca `scaled` piksellerini okur (paylaşılan, değişmez dilim) ve sonucu
+/// kendi `Vec<u8>`'sine üretir — iç iş parçaları arasında paylaşılan yazma
+/// tamponu yoktur, dolayısıyla bölgeler güvenle paralel kodlanabilir.
+fn encode_region(
+    scaled: &crate::encode::Scaled,
+    color: ColorType,
+    quality: u8,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+) -> Result<EncodedRect> {
+    let mut crop = Vec::new();
+    crop_region(scaled, x, y, w, h, &mut crop);
+
+    let mut jpeg = Vec::with_capacity(w as usize * h as usize / 4);
+    Encoder::new(&mut jpeg, quality.clamp(1, 100))
+        .encode(&crop, w as u16, h as u16, color)
+        .map_err(|err| anyhow::anyhow!("JPEG kodlaması başarısız: {err}"))?;
+
+    Ok(EncodedRect {
+        x,
+        y,
+        width: w,
+        height: h,
+        jpeg,
+    })
 }
 
 #[cfg(test)]

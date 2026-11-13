@@ -5,6 +5,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use parking_lot::Mutex;
@@ -24,6 +25,11 @@ use crate::encode::{PixelLayout, RawFrame};
 /// Tek kare tutulur: gönderici yetişemezse ara kareler düşer, bellek sabit kalır.
 type FrameSlot = Arc<Mutex<Option<RawFrame>>>;
 
+/// WGC'nin ilk kareyi üretmesi için tanınan süre. Zayıf makinede WGC
+/// başarıyla başlar ama kare üretimi gecikebilir; bu süre içinde hiç kare
+/// gelmezse DXGI Desktop Duplication'a otomatik düşülür.
+const WGC_FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(3);
+
 pub struct Session {
     slot: FrameSlot,
     running: Arc<AtomicBool>,
@@ -36,16 +42,36 @@ impl Session {
     pub fn start_primary_monitor() -> Result<Self> {
         let slot: FrameSlot = Arc::new(Mutex::new(None));
         let running = Arc::new(AtomicBool::new(true));
+        // WGC ilk kareyi depoladığında sinyal; slot poll'lamak yerine ayrı
+        // bayrak kullanılır çünkü tüketici (Sender) yuvayı boşaltır ve
+        // "kare geldi mi" takibi ancak harici bayrakla yarışsız olur.
+        let produced = Arc::new(AtomicBool::new(false));
 
-        match start_wgc(Arc::clone(&slot), Arc::clone(&running)) {
+        match start_wgc(
+            Arc::clone(&slot),
+            Arc::clone(&running),
+            Arc::clone(&produced),
+        ) {
             Ok(halt) => {
-                tracing::info!("ekran yakalama başladı: Windows Graphics Capture");
-                return Ok(Self {
-                    slot,
-                    running,
-                    backend: "Windows Graphics Capture",
-                    halt: Some(halt),
-                });
+                let deadline = Instant::now() + WGC_FIRST_FRAME_TIMEOUT;
+                while !produced.load(Ordering::Relaxed) && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                if produced.load(Ordering::Relaxed) {
+                    tracing::info!("ekran yakalama başladı: Windows Graphics Capture");
+                    return Ok(Self {
+                        slot,
+                        running,
+                        backend: "Windows Graphics Capture",
+                        halt: Some(halt),
+                    });
+                }
+                // WGC başladı ama ilk kareyi üretmedi; durdurup DXGI'ye düş.
+                halt.store(true, Ordering::Relaxed);
+                tracing::warn!(
+                    timeout = ?WGC_FIRST_FRAME_TIMEOUT,
+                    "WGC ilk kareyi üretmedi, durduruldu; DXGI Desktop Duplication deneniyor"
+                );
             }
             Err(err) => {
                 tracing::warn!(
@@ -101,20 +127,23 @@ struct WgcHandler {
     /// ayrımı bu sayaçlar olmadan yapılamıyor.
     callbacks: u64,
     buffer_failures: u64,
+    /// İlk kare depolandığında set edilen sinyal; fallback zamanlayıcı bunu izler.
+    produced: Arc<AtomicBool>,
 }
 
 impl GraphicsCaptureApiHandler for WgcHandler {
-    type Flags = (FrameSlot, Arc<AtomicBool>);
+    type Flags = (FrameSlot, Arc<AtomicBool>, Arc<AtomicBool>);
     type Error = std::io::Error;
 
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-        let (slot, running) = ctx.flags;
+        let (slot, running, produced) = ctx.flags;
         Ok(Self {
             slot,
             running,
             scratch: Vec::new(),
             callbacks: 0,
             buffer_failures: 0,
+            produced,
         })
     }
 
@@ -164,6 +193,7 @@ impl GraphicsCaptureApiHandler for WgcHandler {
             layout: PixelLayout::Rgba8,
             pixels,
         });
+        self.produced.store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -175,7 +205,11 @@ impl GraphicsCaptureApiHandler for WgcHandler {
 }
 
 /// WGC yakalamasını kendi iş parçacığında başlatır ve durdurma bayrağını döner.
-fn start_wgc(slot: FrameSlot, running: Arc<AtomicBool>) -> Result<Arc<AtomicBool>> {
+fn start_wgc(
+    slot: FrameSlot,
+    running: Arc<AtomicBool>,
+    produced: Arc<AtomicBool>,
+) -> Result<Arc<AtomicBool>> {
     let monitor = Monitor::primary().map_err(|e| anyhow!("birincil ekran bulunamadı: {e}"))?;
 
     let settings = Settings::new(
@@ -190,7 +224,7 @@ fn start_wgc(slot: FrameSlot, running: Arc<AtomicBool>) -> Result<Arc<AtomicBool
         MinimumUpdateIntervalSettings::Default,
         DirtyRegionSettings::Default,
         ColorFormat::Rgba8,
-        (slot, Arc::clone(&running)),
+        (slot, Arc::clone(&running), Arc::clone(&produced)),
     );
 
     let control = WgcHandler::start_free_threaded(settings)

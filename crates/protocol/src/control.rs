@@ -33,35 +33,39 @@ impl StreamQuality {
     pub const PREVIEW: Self = Self {
         max_width: 480,
         max_height: 270,
-        fps: 4,
+        fps: 8,
         jpeg_quality: 55,
-        max_kbps: 1_024,
+        max_kbps: 2_048,
     };
 
     /// Öğretmen ekranının öğrencilere yayını.
     ///
-    /// Tek kodlama, çok sayıda alıcı. Metin okunurluğu önemli olduğu için
-    /// çözünürlük düşürülmez; verim tavanı hareketli içerikte kare hızını
-    /// düşürerek ağı korur.
+    /// Tek kodlama, çok sayıda alıcı. Zayıf makine (4GB RAM) dostu profil:
+    /// çözünürlük 1366x768'e düşürülür ve kare hızıyla verim tavanı yeterli
+    /// seviyede tutulur — hareketli içerikte ağ ve CPU aşırı yüklenmez,
+    /// metin okunurluğu korunur. Eğitim içeriği için JPEG kalitesi 62'de
+    /// algılanamaz seviyede tutuldu.
     pub const BROADCAST: Self = Self {
-        max_width: 1920,
-        max_height: 1080,
-        fps: 25,
-        jpeg_quality: 70,
-        max_kbps: 8_192,
+        max_width: 1366,
+        max_height: 768,
+        fps: 12,
+        jpeg_quality: 62,
+        max_kbps: 4_608,
     };
 
     /// Büyütülmüş tek ekran: okunabilir metin hedeflenir.
     ///
-    /// Ölçüm, 1920x1080'i küçültmenin kodlamaktan pahalı olduğunu gösterdi;
-    /// bu yüzden sınır doğrudan 1080p. Verim tavanı NetSupport'un kablosuz
-    /// varsayılanıyla aynı mertebede tutuldu (8 Mbit/s).
+    /// Zayıf öğrenci makinelerinde tam ekran akışın CPU'yu zorlamaması için
+    /// çözünürlük 1366x768 (16:9 yaklaşık 720p sınıfı) ile sınırlanır, kare
+    /// hızı 12 FPS'e çekilir ve verim tavanı 4,6 Mbit/s'te tutulur. JPEG
+    /// kalitesi 62 — ders içeriğinde fark algılanmadan belirgin CPU/trafik
+    /// kazancı sağlar.
     pub const FOCUSED: Self = Self {
-        max_width: 1920,
-        max_height: 1080,
-        fps: 25,
-        jpeg_quality: 75,
-        max_kbps: 8_192,
+        max_width: 1366,
+        max_height: 768,
+        fps: 12,
+        jpeg_quality: 62,
+        max_kbps: 4_608,
     };
 }
 

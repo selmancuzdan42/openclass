@@ -2972,6 +2972,7 @@ dependencies = [
  "jpeg-encoder",
  "openclass-protocol",
  "parking_lot 0.13.0",
+ "rayon",
  "tracing",
  "windows-capture",
 ]

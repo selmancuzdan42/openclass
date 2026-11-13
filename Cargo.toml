@@ -68,6 +68,9 @@ time        = { version = "0.3", features = ["formatting", "macros"] }
 # Görüntü
 jpeg-encoder = "0.7.1"
 
+# Paralel işleme (bölge bazlı JPEG kodlama)
+rayon = "1.10"
+
 # Tauri
 tauri        = { version = "2.12", features = [] }
 tauri-build  = { version = "2.7", features = [] }

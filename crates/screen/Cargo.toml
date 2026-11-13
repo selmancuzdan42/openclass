@@ -14,6 +14,9 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 parking_lot = { workspace = true }
 
+# Bölge bazlı JPEG kodlamayı birden çok çekirdeğe dağıtmak için.
+rayon = { workspace = true }
+
 # Görüntü işleme: yalnızca ölçekleme için; kodek desteği kapalı tutulur
 # (cross-compile'ı C bağımlılıklarından uzak tutmak için).
 image = { version = "0.25.10", default-features = false }
