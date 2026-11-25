@@ -28,3 +28,6 @@ dist/
 
 # İç geliştirme notları — depoya girmez
 docs/ic/
+
+# Tanıtım videosu çalışma klasörü (kareler, ara dosyalar) — depoya girmez
+brag-output/

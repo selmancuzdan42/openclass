@@ -69,6 +69,15 @@ Okullar sınıf yönetimi için pahalı, kapalı kaynak lisanslara bağımlı. O
 > otomatik başlatma, tarayıcı uyarı sayfası) gerçek laboratuvar donanımında
 > doğrulandı.
 
+## Videolar
+
+| Tanıtım (20 sn) | Kurulum (34 sn) |
+|---|---|
+| [![Tanıtım videosu](docs/assets/tanitim.jpg)](https://selmancuzdan42.github.io/openclass/#video) | [![Kurulum videosu](docs/assets/kurulum.jpg)](https://selmancuzdan42.github.io/openclass/#kurulum) |
+
+Görsele tıklayınca video [tanıtım sitesinde](https://selmancuzdan42.github.io/openclass/) açılır.
+Dosyalar: [`tanitim.mp4`](docs/assets/tanitim.mp4) · [`kurulum.mp4`](docs/assets/kurulum.mp4)
+
 ## Ekran görüntüleri
 
 | Öğretmen konsolu | Öğrenci yapılandırması |
