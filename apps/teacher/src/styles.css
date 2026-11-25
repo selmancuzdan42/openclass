@@ -16,14 +16,14 @@
 
 @theme {
   /* Yüzey katmanları: pencere kromu → içerik → kart */
-  --color-chrome: #f3f3f3;
+  --color-chrome: #f6f7f9;
   --color-surface: #ffffff;
-  --color-surface-2: #fafafa;
-  --color-surface-3: #eeeeee;
-  --color-canvas: #e9e9e9;
+  --color-surface-2: #f9fafb;
+  --color-surface-3: #eceef1;
+  --color-canvas: #eef0f3;
 
-  --color-stroke: #e1e1e1;
-  --color-stroke-strong: #c8c8c8;
+  --color-stroke: #e2e5e9;
+  --color-stroke-strong: #c9cdd3;
 
   --color-text: #1b1b1b;
   --color-text-2: #5c5c5c;
@@ -39,15 +39,29 @@
   --color-danger: #c42b1c;
 }
 
-:root[data-theme="dark"] {
-  --color-chrome: #202020;
-  --color-surface: #272727;
-  --color-surface-2: #2d2d2d;
-  --color-surface-3: #323232;
-  --color-canvas: #1a1a1a;
+/* Türetilmiş belirteçler. `bg-1`/`bg-2` iç içe yüzeylerde (bölmeli seçici,
+   bilgi kutusu) kullanılır; temayla birlikte kendiliğinden değişir. */
+:root {
+  --color-bg-1: var(--color-surface);
+  --color-bg-2: var(--color-surface-3);
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.06), 0 1px 3px rgb(16 24 40 / 0.08);
+  --shadow-card-hover: 0 4px 10px rgb(16 24 40 / 0.1), 0 2px 4px rgb(16 24 40 / 0.06);
+  --shadow-pop: 0 18px 48px rgb(16 24 40 / 0.22), 0 4px 12px rgb(16 24 40 / 0.1);
+}
 
-  --color-stroke: #3b3b3b;
-  --color-stroke-strong: #4a4a4a;
+:root[data-theme="dark"] {
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-card-hover: 0 4px 12px rgb(0 0 0 / 0.5);
+  --shadow-pop: 0 18px 48px rgb(0 0 0 / 0.6), 0 4px 12px rgb(0 0 0 / 0.4);
+
+  --color-chrome: #1c1d20;
+  --color-surface: #25262a;
+  --color-surface-2: #2a2b30;
+  --color-surface-3: #33353b;
+  --color-canvas: #17181a;
+
+  --color-stroke: #36383e;
+  --color-stroke-strong: #484b53;
 
   --color-text: #f0f0f0;
   --color-text-2: #b4b4b4;
@@ -85,6 +99,34 @@ input,
 textarea,
 [data-selectable] {
   user-select: text;
+}
+
+::selection {
+  background: var(--color-accent-border);
+}
+
+input[type="checkbox"] {
+  accent-color: var(--color-accent);
+}
+
+/* Açılır yüzeyler: kısa ve sakin bir giriş. Azaltılmış hareket tercihinde
+   aşağıdaki genel kural bunları da kapatır. */
+@keyframes oc-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes oc-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+}
+.oc-fade {
+  animation: oc-fade 0.14s ease-out;
+}
+.oc-pop {
+  animation: oc-pop 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 /* Odak halkası: klavyeyle gezinen kullanıcı her zaman nerede olduğunu görsün. */

@@ -215,6 +215,7 @@ async fn handle_connection(
         hostname: hostname.clone(),
         address: peer,
         connected_at: crate::db::now(),
+        app_version: authenticated.app_version.clone(),
         sender: tx.clone(),
     }) {
         tracing::info!(%device_id, "aynı cihazın önceki oturumu kapatılıyor");
@@ -269,8 +270,20 @@ async fn handle_connection(
             .as_ref()
             .map(|b| (b.broadcast_id, b.fullscreen, b.multicast.clone()))
     };
+    // Yansıtmada başlıkta kaynağın adı görünür; kaynağın kendisine yayın
+    // penceresi açılmaz.
+    let relay_source = state
+        .broadcast
+        .read()
+        .as_ref()
+        .and_then(|b| b.source.as_ref().map(|s| (s.device_id, s.hostname.clone())));
+    let pending_broadcast =
+        pending_broadcast.filter(|_| relay_source.as_ref().map(|s| s.0) != Some(device_id));
     if let Some((broadcast_id, fullscreen, multicast)) = pending_broadcast {
-        let teacher_name = state.config.read().teacher_name.clone();
+        let teacher_name = match relay_source {
+            Some((_, hostname)) => hostname,
+            None => state.config.read().teacher_name.clone(),
+        };
         let _ = tx
             .send(ServerMessage::TeacherScreenStart {
                 broadcast_id,
@@ -293,6 +306,12 @@ async fn handle_connection(
         }
     }
     state.broadcast_fallback.write().remove(&device_id);
+    // Ekranı sınıfa gösterilen cihaz düşerse yansıtma biter.
+    if state.broadcast_source() == Some(device_id) {
+        if let Some(handle) = state.broadcast.read().as_ref() {
+            handle.stop();
+        }
+    }
     // Gezilen cihaz düşerse gezgin kapanır ve yarım indirme temizlenir.
     {
         let closed = {
@@ -339,6 +358,8 @@ struct Authenticated {
     hostname: String,
     /// Öğrencinin bildirdiği oda adı; eski sürüm ajanlarda `None`.
     room: Option<String>,
+    /// Ajanın bildirdiği sürüm.
+    app_version: String,
 }
 
 type WsSink = futures_util::stream::SplitSink<
@@ -403,34 +424,34 @@ async fn authenticate(
     let mut record = state.db.device(device_id)?;
     tracing::debug!(%peer, %device_id, %hostname, %app_version, kayitli = !record.is_none(), "Hello alındı");
 
-    // NetSupport tarzı otomatik kabul: DB'de kayıtlı olmayan (yeni) bir cihaz;
-    //   * bilgisayar adı LAB/BLAB ile başlıyorsa VEYA
-    //   * Hello'da bildirdiği oda adı, konsolun aktif odasıyla eşleşiyorsa
-    // öğretmen hiçbir şeye dokunmadan anında yetkilendirilir. Öğrenci İP'den
-    // bağlanır bağlanmaz otomatik kabul görür; eşleştirme kodu ya da
-    // 'Yetkilendir' tıklaması gerekmez.
+    // NetSupport tarzı otomatik kabul: DB'de kayıtlı olmayan (yeni) bir cihaz,
+    // konsolun yönettiği kapsama (oda adı ve/veya bilgisayar adı ön eki)
+    // giriyorsa öğretmen hiçbir şeye dokunmadan anında yetkilendirilir;
+    // eşleştirme kodu ya da 'Yetkilendir' tıklaması gerekmez. Kapsam,
+    // arayüzdeki liste süzgeciyle aynı kuraldır: listede görünen cihaz kabul
+    // edilir, görünmeyen edilmez.
     //
-    // Oda karşılaştırması büyük/küçük harf duyarsızdır: öğrenci `blab1`
-    // yazsa bile konsolun `BLAB1` odasıyla eşleşir.
+    // Kapsam "tümü" ise (NetSupport'ta boş ön ek) her yeni cihaz kabul
+    // edilir — ama yalnızca öğretmen bunu açılış seçiminde bilerek seçtiyse.
+    // Seçim yapılmadan önceki boş kapsam bir karar değildir.
     //
-    // Hiçbir koşula uymayan yeni cihazlar (ör. öğretmenin kendi makinesi ya
-    // da yabancı) kuyruğa yazılır ve 'Yetkilendir' ile onay bekler — böylece
-    // otomatik kabul yalnızca laboratuvar alanıyla sınırlı kalır.
+    // Kapsama girmeyen yeni cihazlar kuyruğa yazılır ve 'Yetkilendir' ya da
+    // eşleştirme koduyla onay bekler.
     if record.is_none() {
-        let cfg = state.config.read();
-        let active_room = cfg
-            .active_room
-            .as_ref()
-            .map(|r| r.trim().to_ascii_uppercase());
-        drop(cfg);
-
-        let room_norm = room.as_ref().map(|r| r.to_ascii_uppercase());
-        let room_matches = room_norm
-            .as_ref()
-            .zip(active_room.as_ref())
-            .is_some_and(|(r, a)| !a.is_empty() && r == a);
-        let is_lab_host = hostname.starts_with("LAB") || hostname.starts_with("BLAB");
-        if is_lab_host || room_matches {
+        let in_scope = {
+            let cfg = state.config.read();
+            let chosen =
+                cfg.setup_completed || cfg.active_room.is_some() || cfg.active_prefix.is_some();
+            chosen
+                && openclass_protocol::discovery::scope_match(
+                    cfg.active_room.as_deref(),
+                    cfg.active_prefix.as_deref(),
+                    &hostname,
+                    room.as_deref(),
+                )
+                .is_some()
+        };
+        if in_scope {
             state
                 .db
                 .upsert_paired_device(device_id, &hostname, &claimed_key, None)
@@ -440,7 +461,7 @@ async fn authenticate(
                 .audit(AuditKind::DevicePaired, Some(device_id), Some(&hostname));
             state.notify_devices_changed();
             tracing::info!(
-                %device_id, %hostname, odeslendi = room_matches, "yeni cihaz otomatik yetkilendirildi"
+                %device_id, %hostname, "kapsamdaki yeni cihaz otomatik yetkilendirildi"
             );
             record = state.db.device(device_id)?;
         } else {
@@ -566,6 +587,7 @@ async fn authenticate(
                 device_id,
                 hostname,
                 room,
+                app_version,
             })
         }
 
@@ -674,6 +696,7 @@ async fn authenticate(
                         device_id,
                         hostname,
                         room,
+                        app_version,
                     })
                 }
                 Err(reason) => {
@@ -737,10 +760,20 @@ async fn read_loop(
 
                 match frame {
                     Message::Binary(bytes) => {
-                        let msg: ClientMessage =
-                            openclass_protocol::decode(&bytes, MAX_CONTROL_FRAME)
-                                .context("gelen mesaj çözülemedi")?;
-                        handle_client_message(state, msg, device_id, hostname).await;
+                        // Çözülemeyen mesaj atlanır, bağlantı korunur: daha
+                        // yeni bir ajan bu konsolun tanımadığı bir mesaj
+                        // gönderebilir ve bu, oturumu koparmak için sebep değil.
+                        match openclass_protocol::decode::<ClientMessage>(
+                            &bytes,
+                            MAX_CONTROL_FRAME,
+                        ) {
+                            Ok(msg) => {
+                                handle_client_message(state, msg, device_id, hostname).await;
+                            }
+                            Err(err) => {
+                                tracing::warn!(%device_id, %err, "tanınmayan mesaj atlandı");
+                            }
+                        }
                     }
                     Message::Close(_) => return Ok(()),
                     // Metin ve WebSocket seviyesi ping/pong beklenmez; yok sayılır.
@@ -787,6 +820,21 @@ async fn handle_client_message(
                     bolge = rects.len(), bayt = bytes,
                     "ekran güncellemesi alındı"
                 );
+            }
+
+            // Bu öğrencinin ekranı sınıfa gösteriliyorsa güncelleme yansıtma
+            // döngüsüne de düşer. Kuyruk doluysa kare atlanır ve tam kare
+            // istenir; aksi hâlde izleyenlerde eksik bölge kalırdı.
+            if let Some(relay) = state.relay_for(device_id) {
+                let frame = crate::broadcast::RelayFrame {
+                    width,
+                    height,
+                    keyframe,
+                    rects: rects.clone(),
+                };
+                if relay.try_send(frame).is_err() {
+                    state.request_broadcast_keyframe();
+                }
             }
 
             let needs_keyframe = state.registry.push_screen_update(
@@ -1186,6 +1234,17 @@ async fn handle_client_message(
             // için buraya ulaşmak başlı başına başarıdır; durumu loglarız.
             // Arayüz geri bildirimi komut tarafındaki yerel toast'tan gelir.
             tracing::info!(%device_id, blocked, detail = ?detail, "internet engeli durumu");
+        }
+
+        ClientMessage::UsbBlockAck { blocked, detail } => {
+            tracing::info!(%device_id, blocked, detail = ?detail, "USB kısıtlaması durumu");
+            state
+                .registry
+                .update_flags(device_id, |f| f.usb_blocked = blocked);
+            state.notify_devices_changed();
+            if let Some(detail) = detail {
+                state.emit("device-warning", format!("{hostname}: {detail}"));
+            }
         }
 
         ClientMessage::MessageAck { message_id } => {

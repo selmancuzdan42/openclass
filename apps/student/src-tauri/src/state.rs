@@ -53,6 +53,12 @@ pub struct DiscoveredTeacher {
     #[serde(skip)]
     pub fingerprint: Vec<u8>,
     pub last_seen: i64,
+    /// Konsolun yönettiği oda adı; eski konsollarda `None`.
+    #[serde(skip)]
+    pub room: Option<String>,
+    /// Konsolun yönettiği bilgisayar adı ön eki; eski konsollarda `None`.
+    #[serde(skip)]
+    pub prefix: Option<String>,
 }
 
 /// Öğretmenden gelen bir mesaj.

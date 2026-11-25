@@ -13,6 +13,7 @@ mod browse;
 mod collect;
 mod commands;
 mod config;
+mod devblock;
 mod identity;
 mod input;
 mod keymon;
@@ -76,6 +77,15 @@ pub fn run() {
     };
 
     let cancel = state.cancel.clone();
+
+    // Önceki oturumdan kalmış USB kısıtlaması varsa kaldır. Kısıtlama
+    // oturuma bağlıdır; ajan çökmüş ya da bilgisayar kapanmış olsa bile
+    // bilgisayar bir sonraki açılışta kısıtlı kalmamalı.
+    if let Ok(dir) = paths::data_dir(App::Student) {
+        if devblock::release_all(&dir) {
+            tracing::warn!("önceki oturumdan kalan USB kısıtlaması kaldırıldı");
+        }
+    }
 
     // Yükseltilmiş süreçte ikincil denetçiyi (watchdog) başlat: ana süreç
     // zorla sonlandırılırsa yeniden çalıştırır. Ana sürecin kimliğini işler

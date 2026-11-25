@@ -34,8 +34,9 @@ export function Button({
     <button
       type="button"
       {...rest}
-      className={`inline-flex h-[26px] items-center justify-center gap-1.5 rounded border px-2.5
-        text-[12px] font-medium transition-colors
+      className={`inline-flex h-[26px] items-center justify-center gap-1.5 rounded-md border px-2.5
+        text-[12px] font-medium transition-[background-color,border-color,transform]
+        enabled:active:translate-y-px
         disabled:cursor-not-allowed disabled:opacity-45
         ${TONE[tone]} ${className}`}
     >
@@ -59,7 +60,7 @@ export function IconButton({
       aria-label={label}
       aria-pressed={active}
       {...rest}
-      className={`inline-flex size-[22px] shrink-0 items-center justify-center rounded
+      className={`inline-flex size-[22px] shrink-0 items-center justify-center rounded-md
         transition-colors disabled:cursor-not-allowed disabled:opacity-40
         ${
           active
@@ -81,10 +82,11 @@ export function TextInput({
   return (
     <input
       {...rest}
-      className={`h-[26px] rounded border border-[var(--color-stroke-strong)]
+      className={`h-[26px] rounded-md border border-[var(--color-stroke-strong)]
         bg-[var(--color-surface)] px-2 text-[12px] text-[var(--color-text)]
-        placeholder:text-[var(--color-text-3)]
-        focus:border-[var(--color-accent)] focus:outline-none ${className}`}
+        transition-shadow placeholder:text-[var(--color-text-3)]
+        focus:border-[var(--color-accent)] focus:outline-none
+        focus:shadow-[0_0_0_3px_var(--color-accent-soft)] ${className}`}
     />
   );
 }
@@ -178,7 +180,8 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6"
+      className="oc-fade fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-6
+        backdrop-blur-[2px]"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -187,20 +190,21 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`flex max-h-[88vh] w-full flex-col overflow-hidden rounded-md border
-          border-[var(--color-stroke-strong)] bg-[var(--color-surface)] shadow-2xl ${widths[width]}`}
+        className={`oc-pop flex max-h-[88vh] w-full flex-col overflow-hidden rounded-lg border
+          border-[var(--color-stroke)] bg-[var(--color-surface)]
+          shadow-[var(--shadow-pop)] ${widths[width]}`}
       >
-        <header className="flex h-[36px] shrink-0 items-center justify-between border-b
-          border-[var(--color-stroke)] px-3">
-          <h3 className="text-[12px] font-semibold">{title}</h3>
+        <header className="flex h-[40px] shrink-0 items-center justify-between border-b
+          border-[var(--color-stroke)] px-3.5">
+          <h3 className="text-[13px] font-semibold tracking-tight">{title}</h3>
           <IconButton label="Kapat" onClick={onClose}>
             <X size={14} />
           </IconButton>
         </header>
         <div className="min-h-0 flex-1 overflow-auto p-3">{children}</div>
         {footer && (
-          <footer className="flex h-[44px] shrink-0 items-center justify-end gap-2 border-t
-            border-[var(--color-stroke)] bg-[var(--color-surface-2)] px-3">
+          <footer className="flex h-[46px] shrink-0 items-center justify-end gap-2 border-t
+            border-[var(--color-stroke)] bg-[var(--color-surface-2)] px-3.5">
             {footer}
           </footer>
         )}
@@ -266,8 +270,8 @@ export function ContextMenu({
       role="menu"
       style={{ left: pos.x, top: pos.y }}
       onMouseDown={(e) => e.stopPropagation()}
-      className="fixed z-[60] min-w-[200px] rounded-md border border-[var(--color-stroke-strong)]
-        bg-[var(--color-surface)] py-1 shadow-xl"
+      className="oc-pop fixed z-[60] min-w-[200px] rounded-lg border border-[var(--color-stroke)]
+        bg-[var(--color-surface)] p-1 shadow-[var(--shadow-pop)]"
     >
       {items.map((item, i) =>
         item === null ? (
@@ -281,7 +285,7 @@ export function ContextMenu({
               item.onSelect();
               onClose();
             }}
-            className={`flex w-full items-center gap-2.5 px-3 py-[5px] text-left text-[12px]
+            className={`flex w-full items-center gap-2.5 rounded px-2.5 py-[5px] text-left text-[12px]
               disabled:cursor-not-allowed disabled:opacity-40
               ${
                 item.danger
@@ -301,14 +305,20 @@ export function ContextMenu({
 // ------------------------------------------------------------------ bildirim
 
 type ToastKind = "info" | "success" | "error";
+/** Bildirimin yanında gösterilen isteğe bağlı düğme ("Klasörü aç" gibi). */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
 interface Toast {
   id: number;
   kind: ToastKind;
   text: string;
+  action?: ToastAction;
 }
 
 const ToastContext = createContext<{
-  show: (kind: ToastKind, text: string) => void;
+  show: (kind: ToastKind, text: string, action?: ToastAction) => void;
   /** Bir söz başarısız olursa hatasını bildirim olarak gösterir. */
   guard: <T>(p: Promise<T>, success?: string) => Promise<T | undefined>;
 } | null>(null);
@@ -316,12 +326,13 @@ const ToastContext = createContext<{
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const show = useCallback((kind: ToastKind, text: string) => {
+  const show = useCallback((kind: ToastKind, text: string, action?: ToastAction) => {
     const id = Date.now() + Math.random();
-    setToasts((list) => [...list, { id, kind, text }]);
+    setToasts((list) => [...list, { id, kind, text, action }]);
+    // Düğmeli bildirim tıklanabilecek kadar uzun kalır.
     window.setTimeout(
       () => setToasts((list) => list.filter((t) => t.id !== id)),
-      kind === "error" ? 8000 : 3200,
+      kind === "error" ? 8000 : action ? 7000 : 3200,
     );
   }, []);
 
@@ -349,8 +360,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={t.id}
             role="status"
-            className={`pointer-events-auto flex items-start gap-2 rounded border px-2.5 py-2
-              text-[12px] shadow-lg
+            className={`oc-pop pointer-events-auto flex items-start gap-2 rounded-lg border px-3 py-2
+              text-[12px] shadow-[var(--shadow-pop)]
               ${
                 t.kind === "error"
                   ? "border-[var(--color-danger)] bg-[var(--color-danger)] text-white"
@@ -366,7 +377,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             ) : (
               <Info size={14} className="mt-px shrink-0" />
             )}
-            <span className="min-w-0 break-words">{t.text}</span>
+            <span className="min-w-0 flex-1 break-words">{t.text}</span>
+            {t.action && (
+              <button
+                type="button"
+                onClick={t.action.onClick}
+                className="shrink-0 rounded border border-current/40 px-1.5 py-px text-[11px]
+                  font-semibold hover:bg-white/15"
+              >
+                {t.action.label}
+              </button>
+            )}
           </div>
         ))}
       </div>

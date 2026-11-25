@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use openclass_protocol::control::{FrameCodec, ScreenRect, ServerMessage, StreamQuality};
 use openclass_screen::{CaptureSession, TileEncoder};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -42,7 +43,64 @@ pub struct BroadcastHandle {
     pub fullscreen: bool,
     /// Multicast açıksa taşıma bilgisi; geç katılan öğrenciye de verilir.
     pub multicast: Option<openclass_protocol::MulticastInfo>,
+    /// Yayının kaynağı bir öğrenci ekranıysa o öğrenci; `None` ise öğretmen
+    /// kendi ekranını yayınlıyor.
+    pub source: Option<RelaySource>,
     cancel: CancellationToken,
+}
+
+/// Ekranı sınıfa gösterilen öğrenci.
+pub struct RelaySource {
+    pub device_id: Uuid,
+    pub hostname: String,
+    /// Öğrenciden gelen ekran güncellemeleri buraya düşer (bkz.
+    /// `net::server`); yansıtma döngüsü onları diğer öğrencilere aktarır.
+    pub frames: mpsc::Sender<RelayFrame>,
+}
+
+/// Yansıtılan öğrenciden gelen tek bir ekran güncellemesi.
+pub struct RelayFrame {
+    pub width: u32,
+    pub height: u32,
+    pub keyframe: bool,
+    pub rects: Vec<ScreenRect>,
+}
+
+/// Yansıtma kuyruğunun boyu. Dolarsa kare düşer ve kaynaktan tam kare
+/// istenir; izleyenlerde bozuk bölge kalmaz.
+const RELAY_QUEUE: usize = 32;
+
+type Multicast = (
+    std::net::UdpSocket,
+    std::net::SocketAddr,
+    openclass_protocol::MulticastInfo,
+);
+
+/// Multicast soketini ve bu yayına özel oturum anahtarını hazırlar.
+fn prepare_multicast() -> Option<Multicast> {
+    // Her yayının kendi oturum anahtarı olur ve yayın bitince düşer.
+    let multicast = open_multicast().map(|(socket, target)| {
+        let mut key = [0u8; 32];
+        // İşletim sisteminin rastgele kaynağı; yayın anahtarı tahmin
+        // edilebilir olmamalı.
+        if getrandom::fill(&mut key).is_err() {
+            tracing::error!("multicast oturum anahtarı üretilemedi");
+        }
+        tracing::info!(%target, "multicast yayını açık");
+        (
+            socket,
+            target,
+            openclass_protocol::MulticastInfo {
+                group: target.ip().to_string(),
+                port: target.port(),
+                key,
+            },
+        )
+    });
+    if multicast.is_none() {
+        tracing::warn!("multicast soketi açılamadı, yayın yalnızca TLS üzerinden gidecek");
+    }
+    multicast
 }
 
 impl BroadcastHandle {
@@ -114,28 +172,7 @@ pub fn start(state: Arc<AppState>, fullscreen: bool) -> Result<BroadcastHandle> 
     let cancel = CancellationToken::new();
     let backend = session.backend_name();
 
-    // Her yayının kendi oturum anahtarı olur ve yayın bitince düşer.
-    let multicast = open_multicast().map(|(socket, target)| {
-        let mut key = [0u8; 32];
-        // İşletim sisteminin rastgele kaynağı; yayın anahtarı tahmin
-        // edilebilir olmamalı.
-        if getrandom::fill(&mut key).is_err() {
-            tracing::error!("multicast oturum anahtarı üretilemedi");
-        }
-        tracing::info!(%target, "multicast yayını açık");
-        (
-            socket,
-            target,
-            openclass_protocol::MulticastInfo {
-                group: target.ip().to_string(),
-                port: target.port(),
-                key,
-            },
-        )
-    });
-    if multicast.is_none() {
-        tracing::warn!("multicast soketi açılamadı, yayın yalnızca TLS üzerinden gidecek");
-    }
+    let multicast = prepare_multicast();
 
     tracing::info!(%broadcast_id, backend, "öğretmen ekranı yayını başlıyor");
 
@@ -156,8 +193,303 @@ pub fn start(state: Arc<AppState>, fullscreen: bool) -> Result<BroadcastHandle> 
         started_at: crate::db::now(),
         fullscreen,
         multicast: info,
+        source: None,
         cancel,
     })
+}
+
+/// Bir öğrencinin ekranını sınıfın geri kalanına gösterir.
+///
+/// Öğrenciden zaten gelen ekran güncellemeleri **yeniden kodlanmadan**
+/// öğretmen yayınının taşıma yoluna (multicast + TLS yedeği) aktarılır.
+/// İzleyen öğrenciler için bu sıradan bir öğretmen yayınıdır; eski sürüm
+/// ajanlar da görür. Kaynak öğrenciye yayın penceresi açılmaz, bunun yerine
+/// ekranının gösterildiği bildirilir.
+pub async fn start_relay(
+    state: Arc<AppState>,
+    device_id: Uuid,
+    fullscreen: bool,
+) -> Result<BroadcastHandle> {
+    let source_tx = state
+        .registry
+        .sender(device_id)
+        .context("cihaz bağlı değil")?;
+    let hostname = state
+        .registry
+        .hostname(device_id)
+        .context("cihaz bağlı değil")?;
+
+    // Kaynağın akışını yayın kalitesine yükselt; bitince eskisine döner.
+    let flags = state.registry.flags(device_id);
+    let previous_quality = flags.quality.unwrap_or(StreamQuality::PREVIEW);
+    let quality = StreamQuality::BROADCAST;
+    let upgrade = if flags.streaming {
+        ServerMessage::UpdateStreamQuality {
+            stream_id: 1,
+            quality,
+        }
+    } else {
+        ServerMessage::StartScreenStream {
+            stream_id: 1,
+            quality,
+        }
+    };
+    source_tx
+        .send(upgrade)
+        .await
+        .ok()
+        .context("cihazla bağlantı kapandı")?;
+    state.registry.update_flags(device_id, |f| {
+        f.streaming = true;
+        f.quality = Some(quality);
+    });
+
+    let broadcast_id = Uuid::new_v4();
+    let cancel = CancellationToken::new();
+    let multicast = prepare_multicast();
+    let info = multicast.as_ref().map(|(_, _, info)| info.clone());
+    let (frames, rx) = mpsc::channel(RELAY_QUEUE);
+
+    tracing::info!(%broadcast_id, %device_id, %hostname, "öğrenci ekranı sınıfa gösteriliyor");
+
+    tauri::async_runtime::spawn(run_relay(
+        Arc::clone(&state),
+        RelayTask {
+            device_id,
+            hostname: hostname.clone(),
+            source_tx,
+            previous_quality,
+            rx,
+        },
+        broadcast_id,
+        fullscreen,
+        multicast,
+        cancel.clone(),
+    ));
+
+    Ok(BroadcastHandle {
+        broadcast_id,
+        started_at: crate::db::now(),
+        fullscreen,
+        multicast: info,
+        source: Some(RelaySource {
+            device_id,
+            hostname,
+            frames,
+        }),
+        cancel,
+    })
+}
+
+/// Yansıtma döngüsünün kaynağa ait parçaları.
+struct RelayTask {
+    device_id: Uuid,
+    hostname: String,
+    source_tx: mpsc::Sender<ServerMessage>,
+    previous_quality: StreamQuality,
+    rx: mpsc::Receiver<RelayFrame>,
+}
+
+/// Yansıtma döngüsü: kaynaktan gelen güncellemeleri diğer öğrencilere aktarır.
+async fn run_relay(
+    state: Arc<AppState>,
+    mut task: RelayTask,
+    broadcast_id: Uuid,
+    fullscreen: bool,
+    multicast: Option<Multicast>,
+    cancel: CancellationToken,
+) {
+    let source = task.device_id;
+
+    // Kaynak dışındaki herkese yayının başladığını bildir. Başlıkta kimin
+    // ekranı olduğu görünsün diye ad alanına öğrencinin bilgisayar adı konur.
+    for (id, tx) in state.registry.all_senders() {
+        if id == source {
+            continue;
+        }
+        let _ = tx
+            .send(ServerMessage::TeacherScreenStart {
+                broadcast_id,
+                teacher_name: task.hostname.clone(),
+                fullscreen,
+                multicast: multicast.as_ref().map(|(_, _, info)| info.clone()),
+            })
+            .await;
+    }
+    // Öğrenciden gizlenmez: ekranının sınıfa gösterildiği açıkça bildirilir.
+    let _ = task
+        .source_tx
+        .send(ServerMessage::Notice {
+            message_id: Uuid::new_v4(),
+            title: "Ekranınız sınıfa gösteriliyor".into(),
+            body: "Öğretmeniniz ekranınızı sınıftaki diğer öğrencilere gösteriyor.".into(),
+        })
+        .await;
+    // İzleyenler tam kareyle başlamalı.
+    state.request_broadcast_keyframe();
+
+    let mut ticker = tokio::time::interval(Duration::from_millis(250));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut seq: u64 = 0;
+
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => break,
+
+            _ = ticker.tick() => {
+                if !state.registry.is_online(source) {
+                    tracing::info!(%source, "ekranı gösterilen öğrenci ayrıldı, yansıtma bitiyor");
+                    break;
+                }
+                // İzleyenlerden biri eksik parça bildirdi ya da yeni katıldı:
+                // tam kareyi kaynak öğrenci üretir.
+                if state.take_broadcast_keyframe_request() {
+                    let _ = task
+                        .source_tx
+                        .send(ServerMessage::RequestKeyframe { stream_id: 1 })
+                        .await;
+                }
+            }
+
+            frame = task.rx.recv() => {
+                let Some(frame) = frame else { break };
+                // İlk aktarılan güncelleme tam kare olmalı; öncesindeki
+                // farklar izleyende boş tuvale çizilirdi.
+                if seq == 0 && !frame.keyframe {
+                    continue;
+                }
+                seq += 1;
+                if seq == 1 {
+                    tracing::info!(
+                        genislik = frame.width,
+                        yukseklik = frame.height,
+                        bolge = frame.rects.len(),
+                        "yansıtmanın ilk karesi aktarılıyor"
+                    );
+                }
+                let message = ServerMessage::TeacherScreenUpdate {
+                    seq,
+                    width: frame.width,
+                    height: frame.height,
+                    keyframe: frame.keyframe,
+                    codec: FrameCodec::Jpeg,
+                    rects: frame.rects,
+                };
+                distribute(
+                    &state,
+                    multicast.as_ref(),
+                    broadcast_id,
+                    seq,
+                    frame.keyframe,
+                    &message,
+                    Some(source),
+                );
+            }
+        }
+    }
+
+    for (id, tx) in state.registry.all_senders() {
+        if id != source {
+            let _ = tx.send(ServerMessage::TeacherScreenStop).await;
+        }
+    }
+
+    // Kaynak hâlâ bağlıysa akışını eski kalitesine döndür ve bittiğini bildir.
+    if state.registry.is_online(source) {
+        let quality = task.previous_quality;
+        let _ = task
+            .source_tx
+            .send(ServerMessage::UpdateStreamQuality {
+                stream_id: 1,
+                quality,
+            })
+            .await;
+        state
+            .registry
+            .update_flags(source, |f| f.quality = Some(quality));
+        let _ = task
+            .source_tx
+            .send(ServerMessage::Notice {
+                message_id: Uuid::new_v4(),
+                title: "Ekran gösterimi bitti".into(),
+                body: "Ekranınız artık sınıfa gösterilmiyor.".into(),
+            })
+            .await;
+    }
+
+    // Yalnızca kendi kaydını düşür: başlatma yarışında bu yansıtma hiç
+    // kaydedilmemiş olabilir ve yuvada başka bir yayın duruyor olabilir.
+    {
+        let mut slot = state.broadcast.write();
+        if slot.as_ref().map(|b| b.broadcast_id) == Some(broadcast_id) {
+            *slot = None;
+            state.broadcast_fallback.write().clear();
+        }
+    }
+    state.emit_broadcast_or_none();
+    tracing::info!(%broadcast_id, kare = seq, "öğrenci ekranı yansıtması bitti");
+}
+
+/// Bir yayın karesini izleyenlere ulaştırır: önce multicast, sonra TLS yedeği.
+///
+/// `exclude` yansıtmada kaynak öğrencidir; kendi ekranı ona geri gönderilmez.
+fn distribute(
+    state: &AppState,
+    multicast: Option<&Multicast>,
+    broadcast_id: Uuid,
+    seq: u64,
+    keyframe: bool,
+    message: &ServerMessage,
+    exclude: Option<Uuid>,
+) {
+    // 1. Multicast: kare telden **bir kez** geçer, anahtar kopyalar.
+    //    30 öğrenciye TLS unicast ile göndermek aynı kareyi 30 kez
+    //    telden geçirir ve 100 Mbit'lik laboratuvar anahtarını doldurur.
+    let mut multicast_ok = false;
+    if let Some((socket, target, info)) = multicast {
+        match openclass_protocol::encode(message, openclass_protocol::MAX_CONTROL_FRAME) {
+            Ok(payload) => {
+                let key = openclass_protocol::multicast::SessionKey::new(&info.key);
+                match openclass_protocol::multicast::split(
+                    &key,
+                    broadcast_id,
+                    seq as u32,
+                    keyframe,
+                    &payload,
+                ) {
+                    Some(packets) => {
+                        multicast_ok = true;
+                        for packet in &packets {
+                            if let Err(err) = socket.send_to(packet, target) {
+                                // Tek paketin düşmesi kareyi bitirir;
+                                // alıcı eksik parçayı fark edip anahtar
+                                // kare ister.
+                                tracing::trace!(%err, seq, "multicast paketi gönderilemedi");
+                                multicast_ok = false;
+                                break;
+                            }
+                        }
+                    }
+                    None => tracing::warn!(seq, "kare multicast paketlerine bölünemedi"),
+                }
+            }
+            Err(err) => tracing::warn!(%err, "kare multicast için kodlanamadı"),
+        }
+    }
+
+    // 2. TLS yedeği. Multicast kapalıysa herkese; açıksa yalnızca
+    //    "paketler bana ulaşmıyor" diyen öğrencilere. `try_send`:
+    //    kuyruğu dolu olan öğrenci bu kareyi kaçırır ve bir sonraki
+    //    anahtar karede toparlanır.
+    let fallback = state.broadcast_fallback.read().clone();
+    for (device_id, tx) in state.registry.all_senders() {
+        if Some(device_id) == exclude || (multicast_ok && !fallback.contains(&device_id)) {
+            continue;
+        }
+        if tx.try_send(message.clone()).is_err() {
+            tracing::trace!(%device_id, seq, "yayın karesi düşürüldü (yavaş istemci)");
+        }
+    }
 }
 
 /// Yayın döngüsü.
@@ -166,11 +498,7 @@ async fn run(
     session: CaptureSession,
     broadcast_id: Uuid,
     fullscreen: bool,
-    multicast: Option<(
-        std::net::UdpSocket,
-        std::net::SocketAddr,
-        openclass_protocol::MulticastInfo,
-    )>,
+    multicast: Option<Multicast>,
     cancel: CancellationToken,
 ) {
     let quality = StreamQuality::BROADCAST;
@@ -290,57 +618,18 @@ async fn run(
             height: update.height,
             keyframe: update.keyframe,
             codec: FrameCodec::Jpeg,
-            rects: rects.clone(),
+            rects,
         };
 
-        // 1. Multicast: kare telden **bir kez** geçer, anahtar kopyalar.
-        //    30 öğrenciye TLS unicast ile göndermek aynı kareyi 30 kez
-        //    telden geçirir ve 100 Mbit'lik laboratuvar anahtarını doldurur.
-        let mut multicast_ok = false;
-        if let Some((socket, target, info)) = multicast.as_ref() {
-            match openclass_protocol::encode(&message, openclass_protocol::MAX_CONTROL_FRAME) {
-                Ok(payload) => {
-                    let key = openclass_protocol::multicast::SessionKey::new(&info.key);
-                    match openclass_protocol::multicast::split(
-                        &key,
-                        broadcast_id,
-                        seq as u32,
-                        update.keyframe,
-                        &payload,
-                    ) {
-                        Some(packets) => {
-                            multicast_ok = true;
-                            for packet in &packets {
-                                if let Err(err) = socket.send_to(packet, target) {
-                                    // Tek paketin düşmesi kareyi bitirir;
-                                    // alıcı eksik parçayı fark edip anahtar
-                                    // kare ister.
-                                    tracing::trace!(%err, seq, "multicast paketi gönderilemedi");
-                                    multicast_ok = false;
-                                    break;
-                                }
-                            }
-                        }
-                        None => tracing::warn!(seq, "kare multicast paketlerine bölünemedi"),
-                    }
-                }
-                Err(err) => tracing::warn!(%err, "kare multicast için kodlanamadı"),
-            }
-        }
-
-        // 2. TLS yedeği. Multicast kapalıysa herkese; açıksa yalnızca
-        //    "paketler bana ulaşmıyor" diyen öğrencilere. `try_send`:
-        //    kuyruğu dolu olan öğrenci bu kareyi kaçırır ve bir sonraki
-        //    anahtar karede toparlanır.
-        let fallback = state.broadcast_fallback.read().clone();
-        for (device_id, tx) in state.registry.all_senders() {
-            if multicast_ok && !fallback.contains(&device_id) {
-                continue;
-            }
-            if tx.try_send(message.clone()).is_err() {
-                tracing::trace!(%device_id, seq, "yayın karesi düşürüldü (yavaş istemci)");
-            }
-        }
+        distribute(
+            &state,
+            multicast.as_ref(),
+            broadcast_id,
+            seq,
+            update.keyframe,
+            &message,
+            None,
+        );
     }
 
     session.stop();

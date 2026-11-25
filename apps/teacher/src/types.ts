@@ -19,6 +19,8 @@ export interface DeviceView {
   screenError: string | null;
   /** Öğrencinin bildirdiği laboratuvar/oda adı; bilinmiyorsa `null`. */
   room: string | null;
+  /** USB depolama kısıtlı mı? (öğrencinin bildirdiği durum) */
+  usbBlocked: boolean;
 }
 
 export type Authorization = "authorized" | "pending" | "rejected" | "unknown";
@@ -54,6 +56,12 @@ export interface ServerInfo {
   activeRoom: string | null;
   /** Konsolun süzdüğü bilgisayar adı ön eki; `null` ise süzme yok. */
   activePrefix: string | null;
+  /** Açılışta sınıf seçim penceresi gösterilsin mi? */
+  askAtStartup: boolean;
+  /** Bu (öğretmen) bilgisayarının adı. */
+  hostname: string;
+  /** Bilgisayar adından çıkarılan ön ek önerisi (`LAB1-OGR` → `LAB1`). */
+  suggestedPrefix: string | null;
   /** Ağ servisleri başlatılamadıysa sebebi. */
   networkError: string | null;
 }
@@ -108,22 +116,20 @@ export interface BroadcastInfo {
   multicast: boolean;
   /** Multicast ulaşmadığı için TLS yedeğine düşen cihaz sayısı. */
   fallbackCount: number;
+  /** Yayın bir öğrenci ekranının yansıtmasıysa o cihaz; değilse `null`. */
+  sourceDeviceId: string | null;
+  /** Yansıtılan öğrencinin bilgisayar adı. */
+  sourceName: string | null;
 }
 
-/** Öğretmenin tanımladığı laboratuvar grubu. */
+/** Öğretmenin tanımladığı kayıtlı sınıf. */
 export interface DeviceGroup {
   name: string;
-  /** Eşleşme için kullanılan bilgisayar adı ön eki (büyük harf). */
+  /**
+   * Eşleşme için kullanılan bilgisayar adı ön eki (büyük harf). Boşsa grup
+   * yalnızca oda adına göre eşleşir (grup adı = oda adı).
+   */
   prefix: string;
-}
-
-/** Bilgisayar adlarından çıkarılan grup önerisi. */
-export interface GroupSuggestion {
-  /** Bilgisayar adı ön eki; oda tabanlı öneride boş. */
-  prefix: string;
-  deviceCount: number;
-  /** Öneri bir odadan geliyorsa oda adı, değilse `null`. */
-  room: string | null;
 }
 
 /** Bir dosya gönderiminde tek alıcının durumu. */

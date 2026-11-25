@@ -12,7 +12,6 @@ import type {
   DeviceGroup,
   DeviceView,
   FileDestination,
-  GroupSuggestion,
   BrowseView,
   InputEvent,
   TransferView,
@@ -70,13 +69,13 @@ export const api = {
     activeRoom?: string;
     /** Boş metin "ön ek süzmesi yok" demektir. */
     activePrefix?: string;
+    askAtStartup?: boolean;
   }) => call<void>("update_settings", settings),
   getAuditLog: (limit?: number) => call<AuditEntry[]>("get_audit_log", { limit }),
 
   listGroups: () => call<DeviceGroup[]>("list_groups"),
   saveGroup: (name: string, prefix: string) => call<void>("save_group", { name, prefix }),
   deleteGroup: (name: string) => call<void>("delete_group", { name }),
-  suggestGroups: () => call<GroupSuggestion[]>("suggest_groups"),
 
   frameBaseUrl: () => call<string>("frame_base_url"),
 
@@ -118,6 +117,17 @@ export const api = {
     call<number>("lock_devices", { deviceIds, message }),
   unlockDevices: (deviceIds: string[]) => call<number>("unlock_devices", { deviceIds }),
   stopBroadcast: () => call<void>("stop_broadcast"),
+  /** Seçili öğrencinin ekranını sınıfın geri kalanına gösterir. */
+  showStudentScreen: (deviceId: string, fullscreen: boolean) =>
+    call<BroadcastInfo>("show_student_screen", { deviceId, fullscreen }),
+  restartDevice: (deviceId: string) => call<void>("restart_device", { deviceId }),
+  /** USB bellekleri kısıtlar (`true`) ya da açar (`false`). */
+  blockUsb: (deviceIds: string[], block: boolean) =>
+    call<number>("block_usb", { deviceIds, block }),
+  /** PNG'yi `Resimler/OpenClass` altına kaydeder; kaydedilen yolu döner. */
+  saveScreenshot: (deviceId: string, hostname: string, stamp: string, png: number[]) =>
+    call<string>("save_screenshot", { deviceId, hostname, stamp, png }),
+  openScreenshotsDir: () => call<void>("open_screenshots_dir"),
   getBroadcast: () => call<BroadcastInfo | null>("get_broadcast"),
 };
 
@@ -145,6 +155,11 @@ export const AUDIT_LABELS: Record<string, string> = {
   help_requested: "Yardım talebi",
   file_collection_requested: "Dosya toplama istendi",
   device_shutdown: "Bilgisayar kapatıldı",
+  device_restarted: "Bilgisayar yeniden başlatıldı",
+  screenshot_saved: "Ekran görüntüsü kaydedildi",
+  student_screen_shown: "Öğrenci ekranı sınıfa gösterildi",
+  usb_blocked: "USB kısıtlandı",
+  usb_unblocked: "USB açıldı",
 };
 
 export function formatTime(unixSeconds: number): string {

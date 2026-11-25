@@ -43,6 +43,9 @@ pub struct ConnectedDevice {
     pub hostname: String,
     pub address: SocketAddr,
     pub connected_at: i64,
+    /// Ajanın `Hello` ile bildirdiği sürüm; yeni komutların gönderilip
+    /// gönderilemeyeceğine bununla karar verilir.
+    pub app_version: String,
     /// Cihaza mesaj göndermek için kanal. Dolu kanal = yavaş istemci.
     pub sender: mpsc::Sender<ServerMessage>,
 }
@@ -81,6 +84,8 @@ pub struct DeviceView {
     /// görülmüş, hiç bağlanmamış cihazlarda `None` olur: oda adı ancak
     /// `Hello` ile gelir, keşif duyurusunda taşınmaz.
     pub room: Option<String>,
+    /// USB depolama kısıtlı mı? (öğrencinin bildirdiği yürürlükteki durum)
+    pub usb_blocked: bool,
 }
 
 /// Ekranda gösterilen, kısa ömürlü eşleştirme kodu.
@@ -128,6 +133,9 @@ pub struct DeviceFlags {
     pub quality: Option<StreamQuality>,
     pub help_requested: bool,
     pub screen_error: Option<String>,
+    /// Öğrencinin bildirdiği USB kısıtlaması. Bağlantı kopunca öğrenci
+    /// kısıtlamayı kaldırdığı için burada da sıfırlanır.
+    pub usb_blocked: bool,
 }
 
 /// Tüm çalışma anı durumu.
@@ -219,12 +227,31 @@ impl Registry {
             flags.streaming = false;
             flags.quality = None;
             flags.screen_error = None;
+            flags.usb_blocked = false;
         }
         removed
     }
 
+    /// Bağlı cihazın ajanı verilen asgari sürümü karşılıyor mu?
+    ///
+    /// Bağlı değilse `false`. Eski ajanlar tanımadıkları mesajda bağlantıyı
+    /// koparır; yeni komutlar göndermeden önce buna bakılır.
+    pub fn supports(&self, device_id: Uuid, min: (u32, u32, u32)) -> bool {
+        self.connected
+            .read()
+            .get(&device_id)
+            .is_some_and(|c| openclass_protocol::version_at_least(&c.app_version, min))
+    }
+
+    /// Bağlı cihazın bilgisayar adı.
+    pub fn hostname(&self, device_id: Uuid) -> Option<String> {
+        self.connected
+            .read()
+            .get(&device_id)
+            .map(|c| c.hostname.clone())
+    }
+
     /// Cihazın şu anda TLS oturumu açık mı?
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn is_online(&self, device_id: Uuid) -> bool {
         self.connected.read().contains_key(&device_id)
     }
@@ -333,6 +360,7 @@ impl Registry {
                     connected_at: 0,
                     screen_error: None,
                     room: rec.room,
+                    usb_blocked: false,
                 },
             );
         }
@@ -356,6 +384,7 @@ impl Registry {
                 connected_at: 0,
                 screen_error: None,
                 room: d.room.clone(),
+                usb_blocked: false,
             });
             view.discovered = true;
             view.address = Some(d.address.clone());
@@ -385,6 +414,7 @@ impl Registry {
                     view.streaming = f.streaming;
                     view.help_requested = f.help_requested;
                     view.screen_error = f.screen_error.clone();
+                    view.usb_blocked = f.usb_blocked;
                 }
                 if let Some(screen) = screens.get(id) {
                     view.frame_seq = screen.latest_seq;
@@ -476,9 +506,20 @@ impl AppState {
             "fullscreen": handle.fullscreen,
             "multicast": handle.multicast.is_some(),
             "fallbackCount": self.broadcast_fallback.read().len(),
+            "sourceDeviceId": handle.source.as_ref().map(|s| s.device_id.to_string()),
+            "sourceName": handle.source.as_ref().map(|s| s.hostname.clone()),
         });
         drop(guard);
         self.emit("broadcast-changed", info);
+    }
+
+    /// Yayın durumunu bildirir; yayın yoksa arayüze "kapandı" gider.
+    pub fn emit_broadcast_or_none(&self) {
+        if self.broadcasting() {
+            self.emit_broadcast();
+        } else {
+            self.emit("broadcast-changed", Option::<()>::None);
+        }
     }
 
     /// Dosya gönderim listesini arayüze bildirir.
@@ -527,6 +568,25 @@ impl AppState {
     /// Yayın şu anda çalışıyor mu?
     pub fn broadcasting(&self) -> bool {
         self.broadcast.read().is_some()
+    }
+
+    /// Ekranı sınıfa gösterilen öğrenci cihazı (yansıtma açıksa).
+    pub fn broadcast_source(&self) -> Option<Uuid> {
+        self.broadcast
+            .read()
+            .as_ref()
+            .and_then(|b| b.source.as_ref().map(|s| s.device_id))
+    }
+
+    /// `device_id` ekranı sınıfa gösterilen öğrenciyse, karelerinin
+    /// aktarılacağı kanal.
+    pub fn relay_for(&self, device_id: Uuid) -> Option<mpsc::Sender<crate::broadcast::RelayFrame>> {
+        self.broadcast
+            .read()
+            .as_ref()
+            .and_then(|b| b.source.as_ref())
+            .filter(|s| s.device_id == device_id)
+            .map(|s| s.frames.clone())
     }
 }
 
@@ -608,6 +668,7 @@ mod tests {
             hostname: "LAB101".into(),
             address: "192.168.1.50:50000".parse().unwrap(),
             connected_at: now(),
+            app_version: "0.5.1".into(),
             sender: tx,
         });
         reg.update_flags(id, |f| f.streaming = true);

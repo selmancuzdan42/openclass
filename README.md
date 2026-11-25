@@ -5,7 +5,7 @@ laboratuvarları için tasarlanmış sınıf yönetim yazılımı: öğretmen ye
 öğrenci bilgisayarlarını bulur, güvenli biçimde eşleştirir ve ders
 boyunca ekranlarını canlı izler.
 
-> **Durum:** v0.4.0 yayında. Aşağıdaki "Mevcut durum" bölümü neyin
+> **Durum:** v0.5.1 yayında. Aşağıdaki "Mevcut durum" bölümü neyin
 > çalıştığını açıkça listeler.
 
 ## Neden?
@@ -44,9 +44,12 @@ Okullar sınıf yönetimi için pahalı, kapalı kaynak lisanslara bağımlı. O
 | Otomatik başlatma (Windows) | ✅ Task Scheduler, yönetici |
 | İnternet engelleme + tarayıcıda "İnternet kesildi" uyarı sayfası | ✅ Windows |
 | Klavye tuşlarını canlı izleme (şeffaf) | ✅ Windows |
-| NetSupport tarzı otomatik bağlanma (LAB/BLAB önekli cihazlar kod sormadan bağlanır) | ✅ |
+| NetSupport tarzı otomatik bağlanma (konsolun seçtiği oda / ad ön ekine uyan cihazlar kod sormadan bağlanır) | ✅ |
 | Toplu dosya toplama ("Topla") — kök + desen, kaynaktan silme seçenekli | ✅ |
-| Uzaktan bilgisayar kapatma | ✅ `shutdown.exe` |
+| Uzaktan bilgisayar kapatma ve yeniden başlatma | ✅ `shutdown.exe` |
+| Öğrenci ekranını sınıfa yansıtma (yeniden kodlamadan aktarım) | ✅ |
+| Öğrenci ekranının görüntüsünü dosyaya kaydetme (öğretmen komutuyla) | ✅ |
+| USB bellek kısıtlama (bağlantı kopunca kendiliğinden kalkar) | ✅ Windows — gerçek donanımda henüz doğrulanmadı |
 | Native Windows dosya kutuları (gönder: dosya+hedef · al: uzak gezgin + hedef) | ✅ |
 | Zorla kapatınca kendinden yeniden açılma (watchdog) | ✅ Windows |
 | Windows ekran yakalama (WGC + DXGI yedek) | ✅ gerçek Windows'ta doğrulandı |
@@ -168,7 +171,9 @@ Açık bildirimi için [`SECURITY.md`](SECURITY.md). Özet:
 
 - Bağlantılar TLS ile şifrelenir; sertifika eşleştirme anında sabitlenir.
 - Cihazlar hostname ile değil, cihaza özgü Ed25519 anahtarıyla doğrulanır.
-- Ekran görüntüleri diske **kaydedilmez**.
+- Ekran görüntüleri kendiliğinden diske **kaydedilmez**. Yalnızca öğretmen
+  "Ekran görüntüsü al" dediğinde o anki kare `Resimler/OpenClass` altına
+  yazılır ve denetim günlüğüne işlenir.
 - Tepsi simgesi her zaman görünür ve paylaşım sırasında değişir; simgeyi
   gizleyen bir seçenek yoktur.
 - Ders bittiğinde tüm yayınlar, kilitler ve uzaktan kontrol durur.

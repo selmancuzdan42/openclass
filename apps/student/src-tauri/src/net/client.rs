@@ -141,6 +141,8 @@ pub async fn run(state: Arc<AppState>, cancel: CancellationToken) {
         state.stop_browsing();
         // Tuş izlemesi oturuma bağlıdır: bağlantı kopunca kendiliğinden kapanır.
         crate::keymon::stop();
+        // USB kısıtlaması da öyle: öğretmen yokken bilgisayar kısıtlı kalmaz.
+        release_restrictions(&state).await;
 
         if cancel.is_cancelled() {
             return;
@@ -198,13 +200,30 @@ async fn wait_for_wake_or_scan(state: &Arc<AppState>, cancel: &CancellationToken
     }
 }
 
-/// Keşif listesindeki ilk (en erken görünen) öğretmene bağlantı hedefi üretir.
+/// Keşif listesinden, bu cihazı kapsayan öğretmene bağlantı hedefi üretir.
 ///
 /// Eşleştirilmemişken otomatik müracaat için kullanılır; parmak izi keşiften
 /// alındığı için `connect_once`'in mevcut fingerprint handling'i aynen işler.
+///
+/// Yalnızca kapsamı (oda adı / bilgisayar adı ön eki) bu cihaza uyan
+/// konsollara başvurulur: `LAB201`, `LAB1`'i yöneten konsola gitmez ve kendi
+/// öğretmeni açılana kadar bekler. Birden çok konsol uyuyorsa en dar kapsamlı
+/// olan, eşitlikte en erken görünen seçilir.
 fn discovered_target(state: &AppState) -> Option<ConnectTarget> {
+    let room = state.config.read().room.clone();
     let teachers = state.teachers.read();
-    let seen = teachers.values().min_by_key(|t| t.last_seen)?;
+    let (_, seen) = teachers
+        .values()
+        .filter_map(|t| {
+            let score = openclass_protocol::discovery::scope_match(
+                t.room.as_deref(),
+                t.prefix.as_deref(),
+                &state.hostname,
+                room.as_deref(),
+            )?;
+            Some((score, t))
+        })
+        .min_by_key(|(score, t)| (std::cmp::Reverse(*score), t.last_seen))?;
     Some(ConnectTarget {
         host: seen.host.clone(),
         port: seen.control_port,
@@ -237,6 +256,24 @@ async fn auto_probe(state: &Arc<AppState>, target: ConnectTarget, cancel: Cancel
         tracing::info!("otomatik müracaat bağlantısı kapandı, yeniden deneniyor");
     }
     wait_for_wake_or_scan(state, &cancel).await;
+}
+
+/// Bu ajanın uyguladığı USB kısıtlamasını kaldırır ve kaldırdıysa
+/// öğrenciye bildirir.
+async fn release_restrictions(state: &Arc<AppState>) {
+    let released = tokio::task::spawn_blocking(|| {
+        openclass_common::paths::data_dir(openclass_common::paths::App::Student)
+            .map(|dir| crate::devblock::release_all(&dir))
+            .unwrap_or(false)
+    })
+    .await
+    .unwrap_or(false);
+    if released {
+        tracing::info!("bağlantı kapandı, USB kısıtlaması kaldırıldı");
+        state.show_notice(
+            "Öğretmen bağlantısı kapandı.\nUSB bellek kısıtlaması kaldırıldı.".to_string(),
+        );
+    }
 }
 
 fn to_fingerprint(bytes: &[u8]) -> Option<[u8; 32]> {
@@ -615,8 +652,18 @@ async fn session_loop(
                     if matches!(frame, Message::Close(_)) { return Ok(()); }
                     continue;
                 };
-                let msg: ServerMessage = openclass_protocol::decode(&bytes, MAX_CONTROL_FRAME)
-                    .context("gelen mesaj çözülemedi")?;
+                // Çözülemeyen mesaj atlanır, bağlantı korunur: daha yeni bir
+                // konsol bu ajanın tanımadığı bir komut gönderebilir. Oturumu
+                // koparmak yeniden bağlanma döngüsüne ve açık kilit/yayın
+                // gibi durumların düşmesine yol açardı.
+                let msg: ServerMessage =
+                    match openclass_protocol::decode(&bytes, MAX_CONTROL_FRAME) {
+                        Ok(msg) => msg,
+                        Err(err) => {
+                            tracing::warn!(%err, "tanınmayan mesaj atlandı");
+                            continue;
+                        }
+                    };
 
                 handle_server_message(state, msg, tx, &mut ctx, &mut frame_timer).await?;
             }
@@ -1040,10 +1087,7 @@ async fn handle_server_message(
                             }
                         );
                         if !hatalar.is_empty() {
-                            mesaj.push_str(&format!(
-                                "\n\nGönderilemeyen {} dosya:",
-                                hatalar.len()
-                            ));
+                            mesaj.push_str(&format!("\n\nGönderilemeyen {} dosya:", hatalar.len()));
                             for (i, h) in hatalar.iter().take(3).enumerate() {
                                 mesaj.push_str(&format!("\n  {} - {}", i + 1, h));
                             }
@@ -1080,8 +1124,55 @@ async fn handle_server_message(
             #[cfg(windows)]
             std::thread::spawn(|| {
                 std::thread::sleep(std::time::Duration::from_secs(3));
-                shutdown_computer_windows();
+                power_off_windows(false);
             });
+        }
+
+        ServerMessage::RestartDevice => {
+            tracing::warn!("öğretmen bilgisayarı yeniden başlatmak istedi");
+            // Kapatmayla aynı: önce görünür bildirim, sonra işlem. Diğer
+            // platformlarda yalnızca bildirim gösterilir.
+            state.show_notice(
+                "Öğretmeniniz bilgisayarınızı yeniden başlatıyor.\nAçık tüm işlerinizi kaydedin."
+                    .to_string(),
+            );
+            #[cfg(windows)]
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                power_off_windows(true);
+            });
+        }
+
+        ServerMessage::UsbBlock { block } => {
+            let outcome = tokio::task::spawn_blocking(move || {
+                let dir = openclass_common::paths::data_dir(openclass_common::paths::App::Student)
+                    .map_err(|err| format!("{err:#}"))?;
+                Ok::<_, String>(crate::devblock::set_usb_blocked(&dir, block))
+            })
+            .await;
+            let (blocked, detail) = match outcome {
+                Ok(Ok(result)) => result,
+                Ok(Err(err)) => (false, Some(err)),
+                Err(err) => (false, Some(err.to_string())),
+            };
+            tracing::info!(blocked, hata = ?detail, "USB kısıtlaması uygulandı");
+
+            // Kısıtlama sessiz uygulanmaz: gerçekleşen değişiklik öğrenciye
+            // bildirilir.
+            if blocked == block {
+                state.show_notice(
+                    if block {
+                        "Öğretmeniniz USB bellek kullanımını kapattı."
+                    } else {
+                        "Öğretmeniniz USB bellek kullanımını açtı."
+                    }
+                    .to_string(),
+                );
+            }
+
+            let _ = tx
+                .send(ClientMessage::UsbBlockAck { blocked, detail })
+                .await;
         }
 
         ServerMessage::StartKeyMonitor => {
@@ -1316,7 +1407,7 @@ fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-/// Bilgisayarı kapatır (yalnızca Windows).
+/// Bilgisayarı kapatır ya da yeniden başlatır (yalnızca Windows).
 ///
 /// İlk olarak Windows'un yerli `shutdown.exe` komutu kullanılır; bu, yönetici
 /// oturumunda her zaman çalışan en güvenilir yoldur. Komut yoksa (`shutdown`
@@ -1324,13 +1415,14 @@ fn unix_now() -> i64 {
 /// denenir. Her ikisi de yetki veya oturum engeliyle sessizce başarısız
 /// kalabilir; sonuç loglanır.
 #[cfg(windows)]
-fn shutdown_computer_windows() {
+fn power_off_windows(restart: bool) {
     use std::process::Command;
 
-    // 1) Yerli kapatma komutu: `/s` kapat, `/f` uygulamaları zorla kapat,
-    //    `/t 0` gecikmesiz. Bu çağrı admin oturumunda /s /f ile çalışır.
+    // 1) Yerli kapatma komutu: `/s` kapat (`/r` yeniden başlat), `/f`
+    //    uygulamaları zorla kapat, `/t 0` gecikmesiz. Bu çağrı admin
+    //    oturumunda /s /f ile çalışır.
     let cmd = Command::new("shutdown")
-        .args(["/s", "/f", "/t", "0"])
+        .args([if restart { "/r" } else { "/s" }, "/f", "/t", "0"])
         .status();
     match cmd {
         Ok(st) if st.success() => {
@@ -1347,15 +1439,21 @@ fn shutdown_computer_windows() {
 
     // 2) Yedek: doğrudan Windows API.
     use windows_sys::Win32::System::Shutdown::{
-        EWX_FORCE, EWX_POWEROFF, EWX_SHUTDOWN, ExitWindowsEx,
+        ExitWindowsEx, EWX_FORCE, EWX_POWEROFF, EWX_REBOOT, EWX_SHUTDOWN,
     };
-    let status =
-        unsafe { ExitWindowsEx(EWX_SHUTDOWN | EWX_POWEROFF | EWX_FORCE, 0) };
+    let flags = if restart {
+        EWX_REBOOT | EWX_FORCE
+    } else {
+        EWX_SHUTDOWN | EWX_POWEROFF | EWX_FORCE
+    };
+    let status = unsafe { ExitWindowsEx(flags, 0) };
     if status == 0 {
-        tracing::error!("bilgisayar kapatılamadı (yetki veya oturum engeli)");
+        tracing::error!(
+            restart,
+            "bilgisayar kapatılamadı (yetki veya oturum engeli)"
+        );
     }
 }
-
 
 /// Anahtar kare aralığı.
 ///

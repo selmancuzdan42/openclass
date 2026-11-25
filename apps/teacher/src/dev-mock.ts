@@ -39,6 +39,7 @@ function makeDevice(hostname: string, i: number): DeviceView {
     // Oda adını bildirmeyen cihazlar da olmalı: 0.1.0'dan yükselen ajanlar
     // bu alanı göndermez ve arayüz onları "—" ile göstermek zorunda.
     room: i === 13 || i === 14 ? null : hostname.startsWith("LAB1") ? "Lab 1" : "Lab 2",
+    usbBlocked: online && (i === 0 || i === 5),
   };
 }
 
@@ -62,6 +63,9 @@ const serverInfo: ServerInfo = {
   setupCompleted: true,
   activeRoom: null,
   activePrefix: null,
+  askAtStartup: true,
+  hostname: "LAB1-OGR",
+  suggestedPrefix: "LAB1",
   networkError: null,
 };
 
@@ -96,6 +100,11 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   get_broadcast: () => null,
   start_broadcast: () => ({ broadcastId: "x", startedAt: 0 }),
   stop_broadcast: () => null,
+  show_student_screen: () => ({ broadcastId: "x", startedAt: 0 }),
+  restart_device: () => null,
+  block_usb: (args) => (args.deviceIds as string[]).length,
+  save_screenshot: (args) => `/home/ogretmen/Resimler/OpenClass/${args.hostname}_${args.stamp}.png`,
+  open_screenshots_dir: () => null,
   open_browser: () => {
     browseOpen = true;
     browsePath = "";
@@ -169,9 +178,22 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   revoke_device: () => null,
   authorize_device: () => null,
   set_display_name: () => null,
-  update_settings: () => null,
+  update_settings: (args) => {
+    const s = serverInfo as unknown as Record<string, unknown>;
+    for (const key of ["teacherName", "className", "setupCompleted", "askAtStartup"]) {
+      if (args[key] !== undefined && args[key] !== "") s[key] = args[key];
+    }
+    for (const key of ["activeRoom", "activePrefix"]) {
+      if (args[key] !== undefined) s[key] = (args[key] as string).trim() || null;
+    }
+    return null;
+  },
   save_group: (args) => {
-    groups = [...groups, { name: args.name as string, prefix: args.prefix as string }];
+    const name = args.name as string;
+    groups = [
+      ...groups.filter((g) => g.name.toUpperCase() !== name.toUpperCase()),
+      { name, prefix: args.prefix as string },
+    ];
     return null;
   },
   delete_group: (args) => {

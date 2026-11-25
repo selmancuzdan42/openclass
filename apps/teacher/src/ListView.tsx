@@ -9,7 +9,7 @@
  * Gerçek kare gelmediği sürece **sahte görüntü gösterilmez**; bunun yerine
  * nedeni anlatan bir yer tutucu çizilir.
  */
-import { Hand, Monitor, MonitorOff, ShieldAlert, WifiOff } from "lucide-react";
+import { Hand, Monitor, MonitorOff, ShieldAlert, Unplug, WifiOff } from "lucide-react";
 
 import { formatTime } from "./api";
 import { ScreenCanvas } from "@openclass/screen-view";
@@ -53,7 +53,8 @@ export function ThumbnailGrid({
 
   return (
     <div
-      className="grid h-full content-start gap-2 overflow-auto p-2"
+      className="grid h-full auto-rows-max content-start gap-3 overflow-auto
+        bg-[var(--color-canvas)] p-3"
       style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${size}px, 1fr))` }}
     >
       {props.devices.map((device) => (
@@ -93,16 +94,18 @@ function Thumbnail({
           onSelect(device.deviceId, true);
         }
       }}
-      className={`hairline flex cursor-default flex-col overflow-hidden rounded border
-        transition-colors
+      className={`flex cursor-default flex-col overflow-hidden rounded-lg border
+        bg-[var(--color-surface)] transition-[box-shadow,border-color,transform] duration-150
         ${
           isSelected
-            ? "border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]"
-            : "border-[var(--color-stroke-strong)] hover:border-[var(--color-text-3)]"
-        }`}
+            ? "border-[var(--color-accent)] shadow-[0_0_0_2px_var(--color-accent),var(--shadow-card-hover)]"
+            : `border-[var(--color-stroke)] shadow-[var(--shadow-card)]
+               hover:-translate-y-px hover:border-[var(--color-stroke-strong)]
+               hover:shadow-[var(--shadow-card-hover)]`
+        } ${device.online ? "" : "opacity-80"}`}
     >
       {/* Ekran alanı */}
-      <div className="relative aspect-video w-full bg-[#101418]">
+      <div className="relative aspect-video w-full shrink-0 bg-[#101418]">
         {hasFrame ? (
           <ScreenCanvas
             deviceId={device.deviceId}
@@ -138,17 +141,25 @@ function Thumbnail({
 
       {/* Ad şeridi */}
       <div
-        className={`flex h-[26px] shrink-0 items-center gap-1.5 px-1.5
+        className={`flex h-[28px] shrink-0 items-center gap-1.5 px-2 transition-colors
           ${
             isSelected
               ? "bg-[var(--color-accent)] text-white"
-              : "bg-[var(--color-surface-2)] text-[var(--color-text)]"
+              : "bg-[var(--color-surface)] text-[var(--color-text)]"
           }`}
       >
         <StateDot device={device} inverted={isSelected} />
-        <span className="truncate text-[11.5px] font-medium" title={device.hostname}>
+        <span className="truncate text-[11.5px] font-semibold" title={device.hostname}>
           {device.hostname}
         </span>
+        {device.usbBlocked && (
+          <span
+            title="USB bellekler kısıtlı"
+            className={`shrink-0 ${isSelected ? "text-white/85" : "text-[var(--color-warn)]"}`}
+          >
+            <Unplug size={12} />
+          </span>
+        )}
         {device.authorization !== "authorized" ? (
           <span
             title={AUTH_LABEL[device.authorization]}

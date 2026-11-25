@@ -106,6 +106,8 @@ async fn handle(
         control_port,
         cert_fingerprint,
         nonce,
+        room,
+        prefix,
     } = packet
     else {
         // Başka bir öğrencinin duyurusu; bizi ilgilendirmez.
@@ -134,6 +136,8 @@ async fn handle(
         fingerprint_hex,
         fingerprint: cert_fingerprint,
         last_seen: unix_now(),
+        room,
+        prefix,
     };
     let changed = {
         let mut guard = state.teachers.write();

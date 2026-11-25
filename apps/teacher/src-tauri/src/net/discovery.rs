@@ -109,13 +109,18 @@ pub async fn run(state: Arc<AppState>, cancel: CancellationToken) -> Result<()> 
 
 /// Probe paketini yayın adresine ve yapılandırılmış hedeflere gönderir.
 async fn send_probe(socket: &UdpSocket, state: &AppState) -> Result<()> {
-    let packet = DiscoveryPacket::TeacherProbe {
-        protocol: PROTOCOL_VERSION,
-        teacher_id: state.teacher_id,
-        teacher_name: state.config.read().teacher_name.clone(),
-        control_port: state.config.read().control_port,
-        cert_fingerprint: state.tls.fingerprint.to_vec(),
-        nonce: openclass_protocol::random_bytes::<16>(),
+    let packet = {
+        let cfg = state.config.read();
+        DiscoveryPacket::TeacherProbe {
+            protocol: PROTOCOL_VERSION,
+            teacher_id: state.teacher_id,
+            teacher_name: cfg.teacher_name.clone(),
+            control_port: cfg.control_port,
+            cert_fingerprint: state.tls.fingerprint.to_vec(),
+            nonce: openclass_protocol::random_bytes::<16>(),
+            room: cfg.active_room.clone(),
+            prefix: cfg.active_prefix.clone(),
+        }
     };
     let bytes = packet.encode()?;
 

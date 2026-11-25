@@ -41,7 +41,7 @@ OpenClass'ın **savunmadığı** senaryolar:
 | Relay saldırısı | İmzalar TLS sertifika parmak izini kapsar (kanal bağlama) |
 | Eşleştirme kötüye kullanımı | Tek kullanımlık kod, 5 dakika ömür, 5 hatalı deneme sınırı |
 | Bellek tüketimi | Çerçeve boyutu sınırı (8 MiB), cihaz başına tek kare, dolu kuyrukta kare düşürme |
-| Veri sızıntısı | Ekran görüntüleri diske yazılmaz; loglara anahtar/parola/kod yazılmaz |
+| Veri sızıntısı | Ekran görüntüleri kendiliğinden diske yazılmaz (yalnızca öğretmenin açık "Ekran görüntüsü al" komutuyla, denetim kaydıyla); loglara anahtar/parola/kod yazılmaz |
 | Gizli izleme | Tepsi simgesi her zaman görünür ve paylaşım sırasında değişir; simgeyi gizleyen bir seçenek yoktur |
 
 ## Bilinen sınırlamalar

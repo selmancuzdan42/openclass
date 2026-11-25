@@ -2,7 +2,7 @@
  * Durum çubuğu.
  *
  * NetSupport'un durum çubuğundaki bilgi kümesini izler: içinde bulunulan sınıf,
- * bağlı cihaz sayısı, seçili cihaz sayısı ve gruptaki cihaz sayısı. Buna ek
+ * bağlı cihaz sayısı, seçili cihaz sayısı ve listelenen cihaz sayısı. Buna ek
  * olarak seçim kısayolları, görünüm anahtarları ve küçük resim boyutu
  * kaydırıcısı burada toplanır — öğretmen ders sırasında bunları en çok kullanır.
  */
@@ -15,9 +15,10 @@ export type ListMode = "thumbnails" | "details";
 
 export function StatusBar({
   className,
+  onClassClick,
   connected,
   selected,
-  inGroup,
+  listed,
   helpCount,
   broadcast,
   mode,
@@ -29,9 +30,12 @@ export function StatusBar({
   onSelectHelp,
 }: {
   className: string;
+  /** Sınıf adına tıklanınca sınıf seçim penceresi açılır. */
+  onClassClick: () => void;
   connected: number;
   selected: number;
-  inGroup: number;
+  /** Seçili sınıfta (ve aramada) listelenen cihaz sayısı. */
+  listed: number;
   helpCount: number;
   /** Açık ekran yayını; taşıma yolunu göstermek için. */
   broadcast: BroadcastInfo | null;
@@ -47,16 +51,21 @@ export function StatusBar({
     <footer className="flex h-[26px] shrink-0 items-center gap-3 border-t
       border-[var(--color-stroke)] bg-[var(--color-surface)] px-2 text-[11px]
       text-[var(--color-text-2)]">
-      <span className="flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={onClassClick}
+        title="Sınıf değiştir"
+        className="flex items-center gap-1.5 rounded px-1 hover:bg-[var(--color-surface-3)]"
+      >
         <strong className="font-semibold text-[var(--color-text)]">{className}</strong>
-      </span>
+      </button>
 
       {broadcast && <BroadcastBadge broadcast={broadcast} />}
 
       <Divider />
       <Metric label="Bağlı" value={connected} />
       <Metric label="Seçili" value={selected} />
-      <Metric label="Grupta" value={inGroup} />
+      <Metric label="Listede" value={listed} />
 
       <Divider />
       <span className="text-[var(--color-text-3)]">Seç:</span>

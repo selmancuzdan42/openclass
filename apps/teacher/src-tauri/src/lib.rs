@@ -112,6 +112,11 @@ pub fn run() {
             commands::set_download_root,
             commands::collect_files,
             commands::shutdown_device,
+            commands::restart_device,
+            commands::block_usb,
+            commands::show_student_screen,
+            commands::save_screenshot,
+            commands::open_screenshots_dir,
             frame_base_url,
         ])
         .setup({

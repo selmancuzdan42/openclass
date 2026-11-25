@@ -393,6 +393,16 @@ pub enum ClientMessage {
         reason: String,
     },
 
+    /// `ServerMessage::UsbBlock` sonucu.
+    ///
+    /// `blocked` işlem sonrası **yürürlükteki** durumdur; istenen değil.
+    /// Yönetici yetkisi yoksa ya da platform desteklemiyorsa kısıtlama
+    /// uygulanmamış olur ve `detail` nedenini açıklar.
+    UsbBlockAck {
+        blocked: bool,
+        detail: Option<String>,
+    },
+
     /// Öğretmenden gelen mesajın görüldüğü bilgisi.
     MessageAck {
         message_id: Uuid,
@@ -668,6 +678,25 @@ pub enum ServerMessage {
 
     /// Yardım talebinin öğretmen tarafından alındığı bilgisi.
     HelpAcknowledged,
+
+    /// Öğrencinin bilgisayarını yeniden başlatır.
+    ///
+    /// `ShutdownDevice` ile aynı kurallar: öğretmenin açık komutudur ve
+    /// öğrenciye önce görünür bir bildirim gösterilir. 0.5.1 öncesi ajanlar
+    /// bu mesajı tanımaz; konsol onlara göndermez.
+    RestartDevice,
+
+    /// USB depolama aygıtlarını (bellek, harici disk) kısıtlar ya da açar.
+    ///
+    /// Klavye, fare gibi diğer USB aygıtları etkilenmez. Kısıtlama **oturuma
+    /// bağlıdır**: bağlantı koptuğunda öğrenci ajanı onu kendiliğinden geri
+    /// alır; ders bitince bilgisayar kısıtlı kalmaz. Öğrenciye her
+    /// değişiklikte bildirim gösterilir. 0.5.1 öncesi ajanlar bu mesajı
+    /// tanımaz; konsol onlara göndermez.
+    UsbBlock {
+        /// `true` kısıtlar, `false` açar.
+        block: bool,
+    },
 
     Ping {
         token: u64,
@@ -947,7 +976,7 @@ mod arayuz_bicimi_testleri {
             protocol: crate::PROTOCOL_VERSION,
             device_id: Uuid::nil(),
             hostname: "LAB101".into(),
-            app_version: "0.4.0".into(),
+            app_version: "0.5.1".into(),
             public_key: vec![3u8; 32],
             room: Some("Lab 1".into()),
         };

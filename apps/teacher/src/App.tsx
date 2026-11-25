@@ -2,7 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   AlertTriangle,
+  Camera,
   Cast,
+  FolderOpen,
+  School,
+  ChevronDown,
+  Presentation,
+  RotateCw,
+  Unplug,
+  Usb,
   CheckSquare,
   ClipboardList,
   Hand,
@@ -44,8 +52,7 @@ import {
   CollectDialog,
   FocusDialog,
   LockDialog,
-  RoomPickerDialog,
-  GroupDialog,
+  ClassPickerDialog,
   MessageDialog,
   PairingDialog,
   SettingsDialog,
@@ -54,7 +61,6 @@ import {
 import { BrowseDialog } from "./BrowseDialog";
 import { open as openFileDialog, open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { TransfersDialog } from "./TransfersDialog";
-import { GroupBar, type GroupTab } from "./GroupBar";
 import { DetailsTable, ThumbnailGrid } from "./ListView";
 import { Ribbon, type RibbonTab } from "./Ribbon";
 import { StatusBar, type ListMode } from "./StatusBar";
@@ -114,6 +120,9 @@ function Console() {
   const [devices, setDevices] = useState<DeviceView[]>([]);
   const [groups, setGroups] = useState<DeviceGroup[]>([]);
   const [info, setInfo] = useState<ServerInfo | null>(null);
+  // Sınıf seçim penceresi: açılışta bir kez, sonra durum çubuğundan açılır.
+  const [classOpen, setClassOpen] = useState(false);
+  const classAsked = useRef(false);
   const [frameBaseUrl, setFrameBaseUrl] = useState("");
   const [broadcast, setBroadcast] = useState<BroadcastInfo | null>(null);
   const [controlled, setControlled] = useState<string | null>(null);
@@ -121,13 +130,13 @@ function Console() {
   const [lockOpen, setLockOpen] = useState(false);
   const [collectOpen, setCollectOpen] = useState(false);
   const [shutdownTarget, setShutdownTarget] = useState<DeviceView | null>(null);
+  const [restartTarget, setRestartTarget] = useState<DeviceView | null>(null);
   const [transfersOpen, setTransfersOpen] = useState(false);
   // Uzak dosya gezgini: "Dosya Al" yalnızca tek seçili öğrenciyle açılır.
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseDevice, setBrowseDevice] = useState<DeviceView | null>(null);
 
   // Seçim ve filtre
-  const [activeGroup, setActiveGroup] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [appliedQuery, setAppliedQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -136,7 +145,6 @@ function Console() {
   const [pairing, setPairing] = useState<PairingInfo | null>(null);
   const [pairingOpen, setPairingOpen] = useState(false);
   const [messageOpen, setMessageOpen] = useState(false);
-  const [groupOpen, setGroupOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
@@ -186,6 +194,15 @@ function Console() {
     })();
   }, [refreshDevices, refreshInfo, refreshGroups]);
 
+  // NetSupport'un Class Wizard'ı gibi: konsol açılınca hangi sınıfın
+  // yönetileceği sorulur. Henüz seçim yapılmadıysa her zaman, yapıldıysa
+  // "açılışta sor" açıkken gösterilir.
+  useEffect(() => {
+    if (!info || classAsked.current) return;
+    classAsked.current = true;
+    if (!info.setupCompleted || info.askAtStartup) setClassOpen(true);
+  }, [info]);
+
   useEffect(() => {
     const unlisten = [
       listen("devices-changed", () => void refreshDevices()),
@@ -194,6 +211,8 @@ function Console() {
       listen<string | null>("control-changed", (e) => setControlled(e.payload)),
       listen("pairing-changed", () => void api.getPairing().then(setPairing).catch(() => {})),
       listen<string>("network-error", (e) => show("error", e.payload)),
+      // Öğrenci bir kısıtlamayı uygulayamadığında nedeni bildirir.
+      listen<string>("device-warning", (e) => show("error", e.payload)),
       listen<HelpEvent>("help-request", (e) => {
         show("info", `${e.payload.hostname} yardım istiyor.`);
         void refreshDevices();
@@ -244,13 +263,8 @@ function Console() {
 
   // ----------------------------------------------------------- türetilenler
 
-  const groupFilter = useMemo(
-    () => groups.find((g) => g.name === activeGroup) ?? null,
-    [groups, activeGroup],
-  );
-
   /**
-   * Grup sekmesi ve arama kutusu birlikte uygulanır.
+   * Seçili sınıfın kapsamı ve arama kutusu birlikte uygulanır.
    *
    * Arama bilgisayar adında (ön ek), oda adında ve IP adresinde yapılır;
    * öğretmen hangisini yazdığını belirtmek zorunda değil.
@@ -267,7 +281,6 @@ function Console() {
       // Ön ek süzmesi oda süzmesinden bağımsızdır; ikisi birlikte verilirse
       // ikisi birden uygulanır.
       if (onek && !d.hostname.toUpperCase().startsWith(onek)) return false;
-      if (!inGroup(d, groupFilter)) return false;
       if (!search) return true;
       return (
         d.hostname.toUpperCase().startsWith(search) ||
@@ -275,18 +288,7 @@ function Console() {
         (d.address ?? "").toUpperCase().includes(search)
       );
     });
-  }, [devices, groupFilter, appliedQuery, info?.activeRoom, info?.activePrefix]);
-
-  const groupTabs: GroupTab[] = useMemo(() => {
-    const count = (group: DeviceGroup | null) => {
-      const members = devices.filter((d) => inGroup(d, group));
-      return { total: members.length, online: members.filter((d) => d.online).length };
-    };
-    return [
-      { group: null, ...count(null) },
-      ...groups.map((g) => ({ group: g, ...count(g) })),
-    ];
-  }, [devices, groups]);
+  }, [devices, appliedQuery, info?.activeRoom, info?.activePrefix]);
 
   const selectedDevices = useMemo(
     () => devices.filter((d) => selected.has(d.deviceId)),
@@ -296,6 +298,77 @@ function Console() {
   /** Seçim yoksa komutlar görünür listedeki bağlı cihazlara uygulanır. */
   const actionTargets = selectedOnline.length > 0 ? selectedOnline : visible.filter((d) => d.online);
   const helpDevices = devices.filter((d) => d.helpRequested);
+
+  /**
+   * Bir öğrencinin o an görünen ekranını PNG olarak kaydeder.
+   *
+   * Görüntü tuvalden alınır: bölgeler arayüzde birleştirildiği için tam kare
+   * yalnızca burada vardır. Çözünürlük o anki akış kalitesidir — büyütülmüş
+   * görünümde yüksek, ızgarada önizleme boyutunda.
+   */
+  const takeScreenshot = useCallback(
+    async (device: DeviceView) => {
+      const canvases = Array.from(
+        document.querySelectorAll<HTMLCanvasElement>(
+          `canvas[data-screen-device="${device.deviceId}"]`,
+        ),
+      ).filter((c) => c.width > 0 && c.height > 0);
+      const canvas = canvases.sort((a, b) => b.width * b.height - a.width * a.height)[0];
+      if (!canvas) {
+        show("error", `${device.hostname} için kaydedilecek görüntü yok.`);
+        return;
+      }
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) {
+        show("error", "Ekran görüntüsü oluşturulamadı.");
+        return;
+      }
+      const d = new Date();
+      const p = (n: number) => String(n).padStart(2, "0");
+      const stamp = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
+      const png = Array.from(new Uint8Array(await blob.arrayBuffer()));
+      const path = await guard(api.saveScreenshot(device.deviceId, device.hostname, stamp, png));
+      if (path !== undefined) {
+        show("success", `Ekran görüntüsü kaydedildi: ${path}`, {
+          label: "Klasörü aç",
+          onClick: () => void guard(api.openScreenshotsDir()),
+        });
+      }
+    },
+    [guard, show],
+  );
+
+  // Hedef listesi her çizimde yeni bir dizidir; komut şeridinin gereksiz
+  // yeniden kurulmaması için kısıtlama komutu onu bir ref üzerinden okur.
+  const usbAllBlocked = actionTargets.length > 0 && actionTargets.every((d) => d.usbBlocked);
+  const actionTargetsRef = useRef(actionTargets);
+  actionTargetsRef.current = actionTargets;
+
+  /** USB kısıtlamasını seçili (yoksa görünen bağlı) cihazlara uygular. */
+  const blockUsb = useCallback(
+    async (block: boolean) => {
+      const ids = actionTargetsRef.current.map((d) => d.deviceId);
+      const n = await guard(api.blockUsb(ids, block));
+      if (n !== undefined) {
+        show(
+          "success",
+          `${n} bilgisayarda USB bellekler ${block ? "kapatıldı" : "açıldı"}.`,
+        );
+      }
+    },
+    [guard, show],
+  );
+
+  /** Seçili öğrencinin ekranını sınıfa gösterir. */
+  const showStudentScreen = useCallback(
+    async (device: DeviceView) => {
+      await guard(
+        api.showStudentScreen(device.deviceId, true),
+        `${device.hostname} ekranı sınıfa gösteriliyor.`,
+      );
+    },
+    [guard],
+  );
   const focusedDevice = devices.find((d) => d.deviceId === focused) ?? null;
   const menuDevice = devices.find((d) => d.deviceId === menu?.deviceId) ?? null;
 
@@ -475,9 +548,10 @@ function Console() {
             commands: [
               { label: "Cihaz Eşleştir", icon: <Link2 size={18} />, onClick: openPairing },
               {
-                label: "Grup Ekle",
-                icon: <LayoutGrid size={18} />,
-                onClick: () => setGroupOpen(true),
+                label: "Sınıf Değiştir",
+                icon: <School size={18} />,
+                title: "Yönetilen sınıfı seçin ya da yeni sınıf tanımlayın",
+                onClick: () => setClassOpen(true),
               },
             ],
           },
@@ -502,6 +576,23 @@ function Console() {
                         : "Ekranınız bağlı tüm öğrencilere gösterilir",
                     onClick: () => setBroadcastOpen(true),
                   },
+              {
+                label: "Öğrenciyi Göster",
+                icon: <Presentation size={18} />,
+                disabled:
+                  broadcast !== null ||
+                  selectedDevices.length !== 1 ||
+                  selectedDevices[0]?.online !== true,
+                title: broadcast
+                  ? "Önce açık yayını durdurun"
+                  : selectedDevices.length !== 1
+                    ? "Tek bir öğrenci seçin"
+                    : "Seçili öğrencinin ekranı diğer öğrencilere gösterilir",
+                onClick: () => {
+                  const d = selectedDevices[0];
+                  if (d) void showStudentScreen(d);
+                },
+              },
             ],
           },
           {
@@ -628,6 +719,34 @@ function Console() {
                   })(),
               },
               {
+                // Tek düğme: hedeflerin hepsi kısıtlıysa "aç", değilse "kes".
+                label: usbAllBlocked ? "USB'yi Aç" : "USB'yi Kes",
+                icon: usbAllBlocked ? <Usb size={18} /> : <Unplug size={18} />,
+                active: usbAllBlocked,
+                disabled: actionTargets.length === 0,
+                title:
+                  actionTargets.length === 0
+                    ? "Öğrenci seçin"
+                    : usbAllBlocked
+                      ? "USB bellekleri geri açar"
+                      : "USB bellekleri kapatır (klavye ve fare etkilenmez). Bağlantı kopunca kendiliğinden açılır.",
+                onClick: () => void blockUsb(!usbAllBlocked),
+              },
+              {
+                label: "Yeniden Başlat",
+                icon: <RotateCw size={18} />,
+                danger: true,
+                disabled: selectedDevices.length !== 1,
+                title:
+                  selectedDevices.length === 1
+                    ? "Seçili öğrencinin bilgisayarını yeniden başlat"
+                    : "Tek bir cihaz seçin",
+                onClick: () => {
+                  const d = selectedDevices[0];
+                  if (d) setRestartTarget(d);
+                },
+              },
+              {
                 label: "Bilgisayarı Kapat",
                 icon: <Power size={18} />,
                 danger: true,
@@ -670,6 +789,16 @@ function Console() {
                 disabled: selectedDevices.length !== 1,
                 title: "Tek bir cihaz seçin",
                 onClick: () => selectedDevices[0] && void openFocus(selectedDevices[0].deviceId),
+              },
+              {
+                label: "Ekran Görüntüsü",
+                icon: <Camera size={18} />,
+                disabled: selectedDevices.length !== 1 || (selectedDevices[0]?.frameSeq ?? 0) === 0,
+                title:
+                  selectedDevices.length === 1
+                    ? "Seçili öğrencinin o anki ekranını Resimler/OpenClass klasörüne kaydeder"
+                    : "Tek bir cihaz seçin",
+                onClick: () => selectedDevices[0] && void takeScreenshot(selectedDevices[0]),
               },
             ],
           },
@@ -774,38 +903,8 @@ function Console() {
             ],
           },
           {
-            caption: "Sistem",
+            caption: "Konsol",
             commands: [
-              {
-                label: "İnterneti Kes",
-                icon: <WifiOff size={18} />,
-                disabled: actionTargets.length === 0,
-                title:
-                  actionTargets.length === 0
-                    ? "Öğrenci seçin"
-                    : "Seçili öğrencilerin internete çıkışını keser (öğretmen bağlantısı açık kalır)",
-                onClick: () =>
-                  void (async () => {
-                    const ids = actionTargets.map((d) => d.deviceId);
-                    const n = await guard(api.blockInternet(ids, true));
-                    if (n !== undefined) show("success", `${n} öğrencinin interneti kesildi.`);
-                  })(),
-              },
-              {
-                label: "İnterneti Aç",
-                icon: <Wifi size={18} />,
-                disabled: actionTargets.length === 0,
-                title:
-                  actionTargets.length === 0
-                    ? "Öğrenci seçin"
-                    : "Seçili öğrencilerin internetini geri açar",
-                onClick: () =>
-                  void (async () => {
-                    const ids = actionTargets.map((d) => d.deviceId);
-                    const n = await guard(api.blockInternet(ids, false));
-                    if (n !== undefined) show("success", `${n} öğrencinin interneti açıldı.`);
-                  })(),
-              },
               {
                 label: "Ayarlar",
                 icon: <SettingsIcon size={18} />,
@@ -817,18 +916,10 @@ function Console() {
                 onClick: () => setAuditOpen(true),
               },
               {
-                label: "Bilgisayarı Kapat",
-                icon: <Power size={18} />,
-                danger: true,
-                disabled: selectedDevices.length !== 1,
-                title:
-                  selectedDevices.length === 1
-                    ? "Seçili öğrencinin bilgisayarını kapat"
-                    : "Tek bir cihaz seçin",
-                onClick: () => {
-                  const d = selectedDevices[0];
-                  if (d) setShutdownTarget(d);
-                },
+                label: "Görüntü Klasörü",
+                icon: <FolderOpen size={18} />,
+                title: "Kaydedilen ekran görüntülerinin klasörünü açar",
+                onClick: () => void guard(api.openScreenshotsDir()),
               },
             ],
           },
@@ -836,7 +927,7 @@ function Console() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [actionTargets.length, selectedDevices, helpDevices.length, listMode, selected.size, selectWhere, broadcast, info?.onlineCount],
+    [actionTargets.length, selectedDevices, helpDevices.length, listMode, selected.size, selectWhere, broadcast, info?.onlineCount, blockUsb, showStudentScreen, takeScreenshot, usbAllBlocked],
   );
 
   const contextItems: (MenuItem | null)[] = menuDevice
@@ -858,6 +949,18 @@ function Console() {
               void guard(api.startScreenStreams([menuDevice.deviceId], "preview"));
             }
           },
+        },
+        {
+          label: "Ekran görüntüsü al",
+          icon: <Camera size={13} />,
+          disabled: !menuDevice.online || menuDevice.frameSeq === 0,
+          onSelect: () => void takeScreenshot(menuDevice),
+        },
+        {
+          label: "Ekranını sınıfa göster",
+          icon: <Presentation size={13} />,
+          disabled: !menuDevice.online || broadcast !== null,
+          onSelect: () => void showStudentScreen(menuDevice),
         },
         null,
         {
@@ -912,6 +1015,21 @@ function Console() {
         },
         null,
         {
+          label: "Yeniden başlat",
+          icon: <RotateCw size={13} />,
+          danger: true,
+          disabled: !menuDevice.online,
+          onSelect: () => setRestartTarget(menuDevice),
+        },
+        {
+          label: "Bilgisayarı kapat",
+          icon: <Power size={13} />,
+          danger: true,
+          disabled: !menuDevice.online,
+          onSelect: () => setShutdownTarget(menuDevice),
+        },
+        null,
+        {
           label: "Yetkilendir",
           icon: <ShieldCheck size={13} />,
           disabled:
@@ -945,12 +1063,14 @@ function Console() {
     onContextMenu: (deviceId: string, x: number, y: number) => setMenu({ deviceId, x, y }),
     emptyTitle: appliedQuery
       ? `"${appliedQuery}" ile eşleşen bilgisayar yok`
-      : groupFilter
-        ? `${groupFilter.name} grubunda cihaz yok`
+      : info?.activeRoom || info?.activePrefix
+        ? `${info.className} sınıfında henüz bilgisayar yok`
         : "Henüz cihaz yok",
     emptyDetail: appliedQuery
       ? "Ön eki kontrol edin. Arama büyük/küçük harf duyarsızdır."
-      : "Öğrenci bilgisayarlarını eşleştirmek için Sınıf › Cihaz Eşleştir adımını kullanın.",
+      : info?.activeRoom || info?.activePrefix
+        ? "Sınıfın kapsamına giren bilgisayarlar açıldıkça kendiliğinden bağlanır. Başka bir sınıf için Sınıf › Sınıf Değiştir'i kullanın."
+        : "Öğrenci bilgisayarlarını eşleştirmek için Sınıf › Cihaz Eşleştir adımını kullanın.",
   };
 
   // ------------------------------------------------------------------ çizim
@@ -958,31 +1078,46 @@ function Console() {
   return (
     <div className="flex h-full flex-col bg-[var(--color-canvas)]">
       {/* Başlık çubuğu */}
-      <header className="flex h-[38px] shrink-0 items-center gap-3 border-b
+      <header className="flex h-[42px] shrink-0 items-center gap-3 border-b
         border-[var(--color-stroke)] bg-[var(--color-chrome)] px-3">
-        <span className="flex items-center gap-1.5">
-          <Cast size={16} className="text-[var(--color-accent)]" />
-          <span className="text-[12.5px] font-semibold tracking-tight">OpenClass</span>
+        <span className="flex items-center gap-2">
+          <span className="flex size-[24px] items-center justify-center rounded-md
+            bg-[var(--color-accent)] text-white">
+            <Cast size={14} />
+          </span>
+          <span className="text-[13px] font-semibold tracking-tight">OpenClass</span>
         </span>
 
         <span className="h-4 w-px bg-[var(--color-stroke-strong)]" />
 
-        <span className="truncate text-[12px]">
-          <strong className="font-semibold">{info?.className ?? "Laboratuvar"}</strong>
-        </span>
+        <button
+          type="button"
+          onClick={() => setClassOpen(true)}
+          title="Sınıf değiştir"
+          className="flex h-[26px] min-w-0 items-center gap-1.5 rounded-md border
+            border-[var(--color-stroke)] bg-[var(--color-surface)] px-2.5 text-[12px]
+            transition-colors hover:border-[var(--color-stroke-strong)]
+            hover:bg-[var(--color-surface-3)]"
+        >
+          <strong className="truncate font-semibold">{info?.className ?? "Laboratuvar"}</strong>
+          <ChevronDown size={13} className="shrink-0 text-[var(--color-text-3)]" />
+        </button>
 
         <div className="ml-auto flex items-center gap-1.5">
           {broadcast && (
-            <span className="flex h-[24px] items-center gap-1.5 rounded bg-[var(--color-ok)]
-              px-2 text-[11px] font-semibold text-white">
-              <ScreenShare size={12} /> Ekranınız yayınlanıyor
+            <span className="flex h-[24px] items-center gap-1.5 rounded-full bg-[var(--color-ok)]
+              px-2.5 text-[11px] font-semibold text-white">
+              <ScreenShare size={12} />
+              {broadcast.sourceName
+                ? `${broadcast.sourceName} ekranı sınıfa gösteriliyor`
+                : "Ekranınız yayınlanıyor"}
             </span>
           )}
           {helpDevices.length > 0 && (
             <button
               onClick={() => setView("help")}
-              className="flex h-[24px] items-center gap-1.5 rounded bg-[var(--color-warn)]
-                px-2 text-[11px] font-semibold text-white"
+              className="flex h-[24px] items-center gap-1.5 rounded-full bg-[var(--color-warn)]
+                px-2.5 text-[11px] font-semibold text-white transition hover:brightness-110"
             >
               <Hand size={12} /> {helpDevices.length} yardım talebi
             </button>
@@ -1007,21 +1142,6 @@ function Console() {
       )}
 
       <Ribbon tabs={ribbonTabs} activeTab={ribbonTab} onTabChange={setRibbonTab} />
-
-      <GroupBar
-        tabs={groupTabs}
-        activeGroup={activeGroup}
-        onSelect={(name) => {
-          setActiveGroup(name);
-          setSelected(new Set());
-        }}
-        onAdd={() => setGroupOpen(true)}
-        onRemove={async (name) => {
-          await guard(api.deleteGroup(name), `${name} grubu kaldırıldı.`);
-          if (activeGroup === name) setActiveGroup(null);
-          void refreshGroups();
-        }}
-      />
 
       {/* Arama satırı */}
       <div className="flex h-[38px] shrink-0 items-center gap-2 border-b
@@ -1067,10 +1187,12 @@ function Console() {
                 key={key}
                 onClick={() => setView(key)}
                 className={`relative flex h-[54px] flex-col items-center justify-center gap-1
-                  rounded text-[10.5px] transition-colors
+                  rounded-md text-[10.5px] transition-colors
                   ${
                     active
-                      ? "bg-[var(--color-accent-soft)] font-semibold text-[var(--color-accent)]"
+                      ? `bg-[var(--color-accent-soft)] font-semibold text-[var(--color-accent)]
+                         before:absolute before:inset-y-3 before:left-0 before:w-[3px]
+                         before:rounded-full before:bg-[var(--color-accent)]`
                       : "text-[var(--color-text-2)] hover:bg-[var(--color-surface-3)]"
                   }`}
               >
@@ -1088,7 +1210,7 @@ function Console() {
           <button
             onClick={openKeyMonitor}
             className="flex h-[54px] flex-col items-center justify-center gap-1
-              rounded text-[10.5px] text-[var(--color-text-2)] transition-colors
+              rounded-md text-[10.5px] text-[var(--color-text-2)] transition-colors
               hover:bg-[var(--color-surface-3)]"
             title={
               selectedDevices.length === 1
@@ -1123,9 +1245,10 @@ function Console() {
 
       <StatusBar
         className={info?.className ?? "—"}
+        onClassClick={() => setClassOpen(true)}
         connected={info?.onlineCount ?? devices.filter((d) => d.online).length}
         selected={selected.size}
-        inGroup={visible.length}
+        listed={visible.length}
         helpCount={helpDevices.length}
         broadcast={broadcast}
         mode={listMode}
@@ -1165,17 +1288,15 @@ function Console() {
         device={browseDevice}
         onClose={() => setBrowseOpen(false)}
       />
-      <GroupDialog
-        open={groupOpen}
-        existing={groups}
-        onClose={() => setGroupOpen(false)}
-        onSaved={refreshGroups}
-      />
       <SettingsDialog
         open={settingsOpen}
         info={info}
         onClose={() => setSettingsOpen(false)}
         onSaved={refreshInfo}
+        onChangeClass={() => {
+          setSettingsOpen(false);
+          setClassOpen(true);
+        }}
       />
       <AuditDialog open={auditOpen} onClose={() => setAuditOpen(false)} />
       <BroadcastDialog
@@ -1198,25 +1319,33 @@ function Console() {
         onClose={() => setTransfersOpen(false)}
       />
 
-      <RoomPickerDialog
-        open={info !== null && !info.setupCompleted}
+      <ClassPickerDialog
+        open={classOpen}
+        info={info}
+        groups={groups}
         devices={devices}
-        onPick={async ({ room, prefix }) => {
-          await guard(
+        onClose={() => setClassOpen(false)}
+        onGroupsChanged={refreshGroups}
+        onStart={async ({ name, room, prefix }, askAtStartup) => {
+          const ok = await guard(
             api.updateSettings({
+              className: name,
               activeRoom: room,
               activePrefix: prefix,
               setupCompleted: true,
+              askAtStartup,
             }),
           );
-          setInfo(await api.getServerInfo().catch(() => info));
+          if (ok === undefined) return;
+          await refreshInfo();
+          // Sınıf değişince eski seçim anlamını yitirir.
+          setSelected(new Set());
+          setClassOpen(false);
           show(
             "success",
-            room
-              ? `${room} laboratuvarı seçildi.`
-              : prefix
-                ? `${prefix} ile başlayan bilgisayarlar listelenecek.`
-                : "Bütün bilgisayarlar listelenecek.",
+            room || prefix
+              ? `${name} sınıfı açıldı.`
+              : "Tüm bilgisayarlar yönetiliyor.",
           );
         }}
       />
@@ -1248,9 +1377,26 @@ function Console() {
         }}
       />
 
+      <ShutdownDialog
+        restart
+        open={restartTarget !== null}
+        device={restartTarget}
+        onClose={() => setRestartTarget(null)}
+        onShutdown={async (deviceId) => {
+          const device = restartTarget;
+          setRestartTarget(null);
+          if (!device) return;
+          await guard(
+            api.restartDevice(deviceId),
+            `${device.hostname} yeniden başlatılıyor.`,
+          );
+        }}
+      />
+
       <FocusDialog
         device={focusedDevice}
         frameBaseUrl={frameBaseUrl}
+        onScreenshot={() => focusedDevice && void takeScreenshot(focusedDevice)}
         controlled={controlled !== null && controlled === focusedDevice?.deviceId}
         onToggleControl={toggleControl}
         onClose={closeFocus}
@@ -1273,31 +1419,6 @@ function Console() {
 }
 
 // --------------------------------------------------------------- alt görünümler
-
-/**
- * Cihaz verilen gruba ait mi?
- *
- * **Oda adı bilgisayar adı önekinden önce gelir.** Oda, öğrencinin ilk
- * açılışta kendi girdiği değerdir; bilgisayar adı önekine dayanan eşleme ise
- * okulun adlandırma disiplinine bağlıdır ve `DESKTOP-4F9K2A` gibi varsayılan
- * adlarda hiç çalışmaz.
- *
- * Odası bilinen bir cihaz **yalnızca** o odanın grubunda görünür; öneki başka
- * bir grupla eşleşse bile oraya düşmez. Aksi hâlde `LAB1` önekli ama "Lab 2"
- * odasına taşınmış bir makine iki grupta birden görünürdü.
- */
-function inGroup(device: DeviceView, group: DeviceGroup | null): boolean {
-  if (!group) return true;
-  if (device.room) {
-    return device.room.trim().toUpperCase() === group.name.trim().toUpperCase();
-  }
-  // Ön eki boş bir grup yalnızca odaya göre eşleşir. Boş metin her adın
-  // başında bulunduğundan `startsWith("")` bütün cihazları yakalar; odası
-  // bilinmeyen makineler o gruba düşmemeli.
-  const prefix = group.prefix.trim();
-  if (!prefix) return false;
-  return device.hostname.toUpperCase().startsWith(prefix.toUpperCase());
-}
 
 function HelpView({
   devices,

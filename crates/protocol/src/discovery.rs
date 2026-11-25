@@ -43,6 +43,16 @@ pub enum DiscoveryPacket {
         #[serde(with = "serde_bytes")]
         cert_fingerprint: Vec<u8>,
         nonce: Nonce,
+        /// Konsolun yönettiği laboratuvar/oda adı.
+        ///
+        /// Öğrenci, kapsamına girmediği konsola kendiliğinden başvurmaz
+        /// (bkz. [`scope_match`]). `#[serde(default)]` zorunlu: eski konsollar
+        /// bu alanı göndermez ve kapsamı "tümü" sayılır.
+        #[serde(default)]
+        room: Option<String>,
+        /// Konsolun yönettiği bilgisayar adı ön eki (`LAB1`).
+        #[serde(default)]
+        prefix: Option<String>,
     },
 
     /// Öğrenci → öğretmen (unicast cevap). "Ben LAB101'im."
@@ -113,6 +123,47 @@ pub enum HostnameFilter {
     Exact(String),
     /// Adın herhangi bir yerinde geçmesi yeterli.
     Contains(String),
+}
+
+/// Bir cihazın, öğretmen konsolunun yönettiği kapsama girip girmediği.
+///
+/// NetSupport'un "Room" ve "Browse" kipleriyle aynı mantık: konsol bir oda
+/// adı ve/veya bilgisayar adı ön eki seçer; yalnızca bunlara uyan cihazlar
+/// o konsola aittir. İkisi birlikte verilirse ikisi de sağlanmalıdır; ikisi
+/// de boşsa kapsam "tümü"dür ve her cihaz uyar.
+///
+/// Aynı kural üç yerde uygulanır ve aynı kalmalıdır: öğrencinin hangi konsola
+/// başvuracağı, konsolun kimi kendiliğinden yetkilendireceği ve arayüzün
+/// listede kimi göstereceği.
+///
+/// Uymuyorsa `None`; uyuyorsa kapsamın ne kadar dar olduğunu gösteren bir
+/// puan döner. Birden çok konsol uyduğunda öğrenci en dar kapsamlı olanı
+/// seçer: `LAB1001`, `LAB1` yerine `LAB10` konsoluna gider.
+pub fn scope_match(
+    room: Option<&str>,
+    prefix: Option<&str>,
+    hostname: &str,
+    device_room: Option<&str>,
+) -> Option<usize> {
+    let norm = |s: &str| s.trim().to_uppercase();
+    let room = room.map(norm).filter(|r| !r.is_empty());
+    let prefix = prefix.map(norm).filter(|p| !p.is_empty());
+
+    let mut score = 0;
+    if let Some(room) = room {
+        if device_room.map(norm).as_deref() != Some(room.as_str()) {
+            return None;
+        }
+        // Oda eşleşmesi her ön ekten daha belirleyicidir.
+        score += 1_000;
+    }
+    if let Some(prefix) = prefix {
+        if !norm(hostname).starts_with(&prefix) {
+            return None;
+        }
+        score += prefix.chars().count();
+    }
+    Some(score)
 }
 
 /// Bir cihazın arama sorgusuyla eşleşip eşleşmediğine karar verir.
@@ -254,6 +305,68 @@ mod tests {
                 assert_eq!(nonce, [7u8; 16]);
             }
             _ => panic!("yanlış paket tipi"),
+        }
+    }
+
+    #[test]
+    fn kapsam_on_eke_gore_laboratuvarlari_ayirir() {
+        assert!(scope_match(None, Some("LAB1"), "LAB101", None).is_some());
+        assert!(scope_match(None, Some("lab1"), "Lab120", None).is_some());
+        assert!(scope_match(None, Some("LAB1"), "LAB201", None).is_none());
+        assert!(scope_match(None, Some("BIL"), "BIL101", None).is_some());
+    }
+
+    #[test]
+    fn kapsam_odaya_gore_ayirir() {
+        assert!(scope_match(Some("Lab 1"), None, "DESKTOP-X", Some(" lab 1 ")).is_some());
+        assert!(scope_match(Some("Lab 1"), None, "DESKTOP-X", Some("Lab 2")).is_none());
+        // Odası bilinmeyen cihaz bir odaya ait sayılmaz.
+        assert!(scope_match(Some("Lab 1"), None, "LAB101", None).is_none());
+    }
+
+    #[test]
+    fn oda_ve_on_ek_birlikte_verilirse_ikisi_de_aranir() {
+        assert!(scope_match(Some("Lab 1"), Some("LAB1"), "LAB101", Some("Lab 1")).is_some());
+        assert!(scope_match(Some("Lab 1"), Some("LAB1"), "LAB201", Some("Lab 1")).is_none());
+        assert!(scope_match(Some("Lab 1"), Some("LAB1"), "LAB101", Some("Lab 2")).is_none());
+    }
+
+    #[test]
+    fn bos_kapsam_herkesi_kapsar() {
+        assert_eq!(scope_match(None, None, "HERHANGI", None), Some(0));
+        assert_eq!(scope_match(Some("  "), Some(""), "HERHANGI", None), Some(0));
+    }
+
+    #[test]
+    fn dar_kapsam_daha_yuksek_puan_alir() {
+        // LAB1001 hem LAB1 hem LAB10 konsoluna uyar; LAB10 kazanmalı.
+        let lab1 = scope_match(None, Some("LAB1"), "LAB1001", None).unwrap();
+        let lab10 = scope_match(None, Some("LAB10"), "LAB1001", None).unwrap();
+        let tumu = scope_match(None, None, "LAB1001", None).unwrap();
+        assert!(lab10 > lab1 && lab1 > tumu);
+        let oda = scope_match(Some("Lab 1"), None, "LAB1001", Some("Lab 1")).unwrap();
+        assert!(oda > lab10);
+    }
+
+    #[test]
+    fn kapsam_alani_olmayan_probe_cozulur() {
+        // Eski konsollar `room`/`prefix` göndermez; kapsamları "tümü" sayılır.
+        let eski = serde_json::json!({
+            "t": "TeacherProbe",
+            "protocol": crate::PROTOCOL_VERSION,
+            "teacher_id": "00000000-0000-4000-8000-000000000001",
+            "teacher_name": "Öğretmen",
+            "control_port": 7643,
+            "cert_fingerprint": vec![0u8; 32],
+            "nonce": vec![0u8; 16],
+        });
+        let paket: DiscoveryPacket =
+            serde_json::from_value(eski).expect("kapsam alanı olmayan probe çözülmeli");
+        match paket {
+            DiscoveryPacket::TeacherProbe { room, prefix, .. } => {
+                assert_eq!((room, prefix), (None, None));
+            }
+            other => panic!("TeacherProbe beklenirken {other:?} geldi"),
         }
     }
 

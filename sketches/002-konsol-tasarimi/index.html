@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="tr" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenClass — öğretmen konsolu tasarım taslağı</title>
+<style>
+:root {
+  --ink: #0e1526; --ink-2: #172036; --ink-3: #24304d; --ink-text: #c9d3e8; --ink-mute: #7c89a6;
+  --canvas: #f3f5f9; --surface: #ffffff; --surface-2: #f7f8fb; --surface-3: #eceff5;
+  --line: #e3e7ef; --line-2: #cfd6e2;
+  --text: #121a2b; --text-2: #55607a; --text-3: #8791a7;
+  --accent: #2f6bff; --accent-2: #1f55e0; --accent-soft: #e8efff; --accent-ring: rgb(47 107 255 / .28);
+  --ok: #12a150; --ok-soft: #e3f6ea; --warn: #e08a00; --warn-soft: #fff3da; --danger: #e5484d; --danger-soft: #ffe9e9;
+  --violet: #7c5cff; --violet-soft: #efeaff; --teal: #0e9f9a; --teal-soft: #ddf5f3;
+  --shadow-1: 0 1px 2px rgb(16 24 40 / .05), 0 1px 3px rgb(16 24 40 / .07);
+  --shadow-2: 0 6px 16px rgb(16 24 40 / .10), 0 2px 4px rgb(16 24 40 / .06);
+  --shadow-3: 0 24px 60px rgb(10 16 32 / .28), 0 6px 16px rgb(10 16 32 / .12);
+}
+[data-theme="dark"] {
+  --ink: #0b0f1a; --ink-2: #131928; --ink-3: #1e2740;
+  --canvas: #0f1420; --surface: #171d2c; --surface-2: #1b2233; --surface-3: #232c41;
+  --line: #262f45; --line-2: #36415c;
+  --text: #eef2fb; --text-2: #a9b3c9; --text-3: #717c95;
+  --accent: #5b8cff; --accent-2: #7aa2ff; --accent-soft: #1b2a52; --accent-ring: rgb(91 140 255 / .35);
+  --ok: #3ddc84; --ok-soft: #12301f; --warn: #ffb224; --warn-soft: #3a2a08; --danger: #ff6369; --danger-soft: #3a1618;
+  --violet: #a08bff; --violet-soft: #251f47; --teal: #3fd0c9; --teal-soft: #0f2e2d;
+  --shadow-1: 0 1px 2px rgb(0 0 0 / .4); --shadow-2: 0 8px 20px rgb(0 0 0 / .45); --shadow-3: 0 24px 60px rgb(0 0 0 / .65);
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { font: 13px/1.4 "Segoe UI Variable Text", "Segoe UI", Inter, system-ui, sans-serif; color: var(--text);
+  background: var(--canvas); -webkit-font-smoothing: antialiased; user-select: none; overflow: hidden; }
+button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; padding: 0; }
+.ic { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.app { display: grid; grid-template-columns: 228px 1fr; height: 100%; }
+
+/* ---------- kenar çubuğu ---------- */
+.side { background: var(--ink); color: var(--ink-text); display: flex; flex-direction: column; padding: 14px 12px; gap: 14px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 2px 6px; }
+.brand .logo { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: #fff;
+  background: linear-gradient(135deg, #4d83ff, #2a55e6); box-shadow: 0 4px 12px rgb(47 107 255 / .45); }
+.brand b { font-size: 15px; letter-spacing: -.01em; color: #fff; }
+.brand small { display: block; font-size: 10.5px; color: var(--ink-mute); margin-top: -1px; }
+.classbtn { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 10px 11px; border-radius: 11px;
+  background: var(--ink-2); border: 1px solid var(--ink-3); transition: .15s; }
+.classbtn:hover { border-color: #3a4a72; background: #1b2540; }
+.classbtn .dot { width: 34px; height: 34px; border-radius: 9px; background: rgb(47 107 255 / .18); color: #8fb0ff; display: grid; place-items: center; }
+.classbtn .t { flex: 1; min-width: 0; }
+.classbtn .t span { display: block; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-mute); }
+.classbtn .t b { display: block; color: #fff; font-size: 13.5px; }
+.classbtn .ic { color: var(--ink-mute); }
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav h6 { margin: 8px 8px 4px; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-mute); }
+.nav button { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 8px; color: var(--ink-text); transition: .12s; }
+.nav button:hover { background: var(--ink-2); color: #fff; }
+.nav button.on { background: linear-gradient(90deg, rgb(47 107 255 / .28), rgb(47 107 255 / .10)); color: #fff; font-weight: 600; box-shadow: inset 2px 0 0 #5b8cff; }
+.nav .count { margin-left: auto; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-mute); }
+.nav .badge { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--warn); color: #1c1300; font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+.nav .lamp { width: 7px; height: 7px; border-radius: 50%; background: #3ddc84; margin: 0 4px 0 5px; box-shadow: 0 0 0 3px rgb(61 220 132 / .18); }
+.nav button.cls.on { background: var(--ink-2); color: #fff; font-weight: 600; box-shadow: none; }
+.nav .lamp.off { background: #56617c; box-shadow: none; }
+.side .grow { flex: 1; }
+.me { display: flex; align-items: center; gap: 9px; padding: 8px; border-radius: 11px; background: var(--ink-2); }
+.me .av { width: 30px; height: 30px; border-radius: 50%; background: #33405f; color: #fff; font-weight: 700; font-size: 11.5px; display: grid; place-items: center; }
+.me .t { flex: 1; min-width: 0; line-height: 1.25; }
+.me .t b { display: block; color: #fff; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.me .t span { font-size: 11px; color: var(--ink-mute); }
+.me button { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: var(--ink-mute); }
+.me button:hover { background: var(--ink-3); color: #fff; }
+
+/* ---------- ana alan ---------- */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.top { display: flex; align-items: center; gap: 14px; padding: 16px 22px 12px; }
+.top h1 { margin: 0; font-size: 21px; letter-spacing: -.02em; }
+.top .sub { color: var(--text-3); font-size: 12px; margin-top: 1px; }
+.pills { display: flex; gap: 6px; margin-left: 6px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 13px; font-size: 12px; font-weight: 600; background: var(--surface); border: 1px solid var(--line); color: var(--text-2); }
+.pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+.pill.ok { color: var(--ok); background: var(--ok-soft); border-color: transparent; } .pill.ok i { background: var(--ok); }
+.pill.warn { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.pill .ic { width: 13px; height: 13px; }
+.top .sp { flex: 1; }
+.search { display: flex; align-items: center; gap: 8px; width: 260px; height: 34px; padding: 0 11px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); color: var(--text-3); box-shadow: var(--shadow-1); }
+.search input { flex: 1; border: 0; outline: 0; background: none; font: inherit; color: var(--text); min-width: 0; }
+.search kbd { font: 600 10.5px/1 inherit; padding: 3px 5px; border-radius: 5px; background: var(--surface-3); color: var(--text-3); }
+.live { display: none; align-items: center; gap: 7px; height: 28px; padding: 0 4px 0 10px; border-radius: 14px; background: var(--ok); color: #fff; font-size: 12px; font-weight: 600; }
+.live.show { display: inline-flex; }
+.live .ic { width: 14px; height: 14px; }
+.live button { height: 20px; padding: 0 8px; border-radius: 10px; background: rgb(255 255 255 / .22); color: #fff; font-size: 11px; font-weight: 700; }
+.size { width: 84px; accent-color: var(--accent); }
+.seg { display: flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--surface-3); }
+.seg button { width: 30px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: var(--text-3); }
+.seg button.on { background: var(--surface); color: var(--accent); box-shadow: var(--shadow-1); }
+
+/* komut şeridi */
+.bar { margin: 0 22px; padding: 8px; display: flex; align-items: center; gap: 2px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-1); }
+.bar .scope { display: flex; flex-direction: column; justify-content: center; padding: 0 12px 0 8px; margin-right: 4px; border-right: 1px solid var(--line); min-width: 112px; height: 44px; white-space: nowrap; }
+.bar .scope span { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.bar .scope b { font-size: 12.5px; }
+.act { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 10px 0 6px; border-radius: 10px; font-weight: 600; font-size: 12.5px; transition: .12s; white-space: nowrap; }
+.act:hover { background: var(--surface-3); }
+.act:active { transform: translateY(1px); }
+.act .tile { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; }
+.act.blue .tile { background: var(--accent-soft); color: var(--accent); }
+.act.red .tile { background: var(--danger-soft); color: var(--danger); }
+.act.violet .tile { background: var(--violet-soft); color: var(--violet); }
+.act.teal .tile { background: var(--teal-soft); color: var(--teal); }
+.act.amber .tile { background: var(--warn-soft); color: var(--warn); }
+.act.primary { background: var(--accent); color: #fff; padding-right: 14px; box-shadow: 0 4px 12px var(--accent-ring); }
+.act.primary:hover { background: var(--accent-2); }
+.act.primary .tile { background: rgb(255 255 255 / .18); color: #fff; }
+.pair { display: flex; align-items: center; height: 44px; padding: 0 4px 0 6px; gap: 2px; border-radius: 10px; }
+.pair .tile { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; margin-right: 5px; }
+.pair.red .tile { background: var(--danger-soft); color: var(--danger); }
+.pair.amber .tile { background: var(--warn-soft); color: var(--warn); }
+.pair button { height: 30px; padding: 0 9px; border-radius: 8px; font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+.pair button + button { color: var(--text-2); border: 1px solid var(--line); }
+.pair button:hover { background: var(--surface-3); }
+.tg { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 11px; border-radius: 9px; border: 1px solid var(--line); white-space: nowrap; font-weight: 600; font-size: 12px; color: var(--text-2); transition: .12s; }
+.tg:hover { background: var(--surface-3); }
+.tg.on { background: var(--warn-soft); color: var(--warn); box-shadow: inset 0 0 0 1px rgb(224 138 0 / .35); }
+.tg .ic { width: 14px; height: 14px; }
+.bar .sep { width: 1px; height: 26px; background: var(--line); margin: 0 4px; }
+.bar .sp { flex: 1; }
+.act.ghost { color: var(--text-2); padding: 0; width: 32px; flex: none; justify-content: center; }
+.act.ghost .ic { width: 17px; height: 17px; }
+.act.ghost.danger:hover { background: var(--danger-soft); color: var(--danger); }
+
+/* ızgara */
+.gridwrap { flex: 1; min-height: 0; overflow: auto; padding: 16px 22px 90px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); gap: 14px; }
+.card { position: relative; border-radius: 13px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-1); overflow: hidden; transition: transform .14s, box-shadow .14s, border-color .14s; cursor: default; }
+.card:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: var(--line-2); }
+.card.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring), var(--shadow-2); }
+.card.help { border-color: var(--warn); box-shadow: 0 0 0 3px rgb(224 138 0 / .22), var(--shadow-1); }
+.shot { position: relative; aspect-ratio: 16 / 9; background: #0d1220; overflow: hidden; }
+.check { position: absolute; top: 8px; left: 8px; width: 20px; height: 20px; border-radius: 6px; background: rgb(255 255 255 / .92); border: 1.5px solid rgb(20 30 50 / .25); display: grid; place-items: center; color: #fff; opacity: 0; transition: .12s; z-index: 2; }
+.card:hover .check, .card.sel .check { opacity: 1; }
+.card.sel .check { background: var(--accent); border-color: var(--accent); }
+.check .ic { width: 13px; height: 13px; stroke-width: 3; }
+.tag { position: absolute; top: 8px; right: 8px; z-index: 2; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 11px; font-size: 11px; font-weight: 700; color: #1c1300; background: #ffc02e; box-shadow: 0 2px 8px rgb(0 0 0 / .3); animation: pulse 1.8s infinite; }
+.tag .ic { width: 12px; height: 12px; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 5px rgb(255 192 46 / .25), 0 2px 8px rgb(0 0 0 / .3); } }
+.over { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: #dfe6f5; font-size: 11.5px; font-weight: 600; background: rgb(10 14 26 / .72); backdrop-filter: blur(3px); }
+.over .ic { width: 22px; height: 22px; }
+.off { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; height: 100%; color: var(--text-3); font-size: 11.5px;
+  background: repeating-linear-gradient(135deg, var(--surface-2) 0 10px, var(--surface-3) 10px 20px); }
+.off .ic { width: 22px; height: 22px; }
+.card.offline { box-shadow: none; } .card.offline .meta b { color: var(--text-2); }
+.meta { display: flex; align-items: center; gap: 8px; padding: 9px 11px; }
+.meta .st { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); flex: none; }
+.offline .meta .st { background: var(--text-3); box-shadow: none; }
+.meta .n { flex: 1; min-width: 0; line-height: 1.25; }
+.meta b { display: block; font-size: 12.5px; letter-spacing: .01em; }
+.meta .n > span { display: block; font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta .fl { display: flex; gap: 4px; color: var(--text-3); }
+.meta .fl .ic { width: 14px; height: 14px; }
+.badge2 { font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: var(--warn-soft); color: var(--warn); }
+.meta .fl .d { color: var(--danger); } .meta .fl .w { color: var(--warn); }
+
+/* sahte ekranlar */
+.scr { position: absolute; inset: 0; }
+.scr .bar2 { position: absolute; left: 0; right: 0; bottom: 0; height: 7%; background: rgb(10 14 24 / .85); }
+.scr.code { background: #131a2b; } .scr.code i { position: absolute; height: 3.2%; border-radius: 2px; }
+.scr.doc { background: #cfd8ea; } .scr.doc .pg { position: absolute; inset: 8% 22% 0; background: #fff; border-radius: 3px 3px 0 0; box-shadow: 0 2px 10px rgb(0 0 0 / .15); }
+.scr.doc i { position: absolute; left: 10%; height: 3%; border-radius: 2px; background: #c3cad8; }
+.scr.web { background: #fff; } .scr.web .tb { position: absolute; inset: 0 0 auto; height: 12%; background: #e6eaf2; }
+.scr.web .tb::after { content: ""; position: absolute; left: 14%; right: 14%; top: 28%; bottom: 22%; border-radius: 99px; background: #fff; }
+.scr.web .hero { position: absolute; left: 6%; right: 6%; top: 18%; height: 34%; border-radius: 4px; }
+.scr.web i { position: absolute; top: 58%; width: 27%; height: 26%; border-radius: 4px; background: #e9edf5; }
+.scr.sheet { background: #fff; background-image: linear-gradient(#dfe4ee 1px, transparent 1px), linear-gradient(90deg, #dfe4ee 1px, transparent 1px); background-size: 12.5% 9%; }
+.scr.sheet .hd { position: absolute; inset: 0 0 auto; height: 9%; background: #1f8a4c; }
+.scr.sheet i { position: absolute; background: rgb(31 138 76 / .22); }
+.scr.desk .w { position: absolute; border-radius: 4px; background: rgb(255 255 255 / .92); box-shadow: 0 6px 18px rgb(0 0 0 / .3); }
+
+/* seçim çubuğu */
+.selbar { position: absolute; left: calc(228px + (100% - 228px) / 2); bottom: 20px; transform: translate(-50%, 90px); display: flex; align-items: center; gap: 4px; padding: 7px; border-radius: 16px; background: var(--ink); color: #fff; box-shadow: var(--shadow-3); transition: transform .22s cubic-bezier(.2, .9, .2, 1); z-index: 5; }
+.selbar.show { transform: translate(-50%, 0); }
+.selbar .n { padding: 0 12px 0 8px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.selbar .n em { font-style: normal; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 12px; background: var(--accent); display: grid; place-items: center; }
+.selbar button { white-space: nowrap; display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 11px; border-radius: 10px; font-weight: 600; font-size: 12.5px; color: #dbe3f5; }
+.selbar button:hover { background: #24304d; color: #fff; }
+.selbar button.x { padding: 0; width: 34px; justify-content: center; color: #8793ae; }
+.selbar button.warn { color: #ff8f93; }
+.selbar button:disabled { opacity: .35; cursor: not-allowed; background: none; }
+.selbar .sep { width: 1px; height: 20px; background: #2a3654; margin: 0 3px; }
+
+/* pencere */
+.veil { position: fixed; inset: 0; background: rgb(8 12 22 / .55); backdrop-filter: blur(4px); display: none; place-items: center; z-index: 10; }
+.veil.show { display: grid; animation: fade .15s; }
+@keyframes fade { from { opacity: 0; } }
+@keyframes pop { from { opacity: 0; transform: translateY(10px) scale(.98); } }
+.dlg { width: 480px; border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-3); overflow: hidden; animation: pop .2s cubic-bezier(.2, .9, .2, 1); }
+.dlg header { padding: 22px 24px 6px; }
+.dlg header h2 { margin: 0; font-size: 19px; letter-spacing: -.02em; }
+.dlg header p { margin: 4px 0 0; color: var(--text-2); }
+.dlg .body { padding: 14px 24px 6px; display: flex; flex-direction: column; gap: 8px; }
+.hint { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-radius: 12px; background: var(--accent-soft); color: var(--text-2); font-size: 12.5px; }
+.hint .ic { color: var(--accent); width: 18px; height: 18px; }
+.hint b { color: var(--text); } .hint .go { margin-left: auto; height: 30px; padding: 0 12px; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600; white-space: nowrap; }
+.opt { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px; border: 1.5px solid var(--line); text-align: left; width: 100%; transition: .12s; }
+.opt:hover { border-color: var(--line-2); background: var(--surface-2); }
+.opt.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 3px var(--accent-ring); }
+.opt .ico { width: 38px; height: 38px; border-radius: 10px; background: var(--surface-3); color: var(--text-2); display: grid; place-items: center; }
+.opt.on .ico { background: var(--accent); color: #fff; }
+.opt .t { flex: 1; } .opt .t b { display: block; font-size: 13.5px; } .opt .t span { color: var(--text-3); font-size: 12px; }
+.opt .cnt { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ok); font-size: 12.5px; }
+.opt .cnt small { color: var(--text-3); font-weight: 500; }
+.addc { display: flex; align-items: center; justify-content: center; gap: 7px; height: 40px; border-radius: 12px; border: 1.5px dashed var(--line-2); color: var(--text-2); font-weight: 600; }
+.addc:hover { border-color: var(--accent); color: var(--accent); }
+.dlg footer { display: flex; align-items: center; gap: 10px; padding: 16px 24px 22px; }
+.dlg footer label { display: flex; align-items: center; gap: 7px; color: var(--text-2); margin-right: auto; }
+.dlg footer input { accent-color: var(--accent); width: 15px; height: 15px; }
+.btn { height: 36px; padding: 0 16px; border-radius: 10px; font-weight: 600; border: 1px solid var(--line-2); background: var(--surface); }
+.btn.pri { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 4px 12px var(--accent-ring); }
+.note { position: fixed; right: 14px; bottom: 12px; z-index: 20; font-size: 11px; padding: 5px 9px; border-radius: 8px; background: #ffc02e; color: #1c1300; font-weight: 700; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><symbol id="cast" viewBox="0 0 24 24"><path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><path d="M2 12a9 9 0 0 1 8 8"/><path d="M2 16a5 5 0 0 1 4 4"/><line x1="2" x2="2.01" y1="20" y2="20"/></symbol><symbol id="school" viewBox="0 0 24 24"><path d="M14 21v-3a2 2 0 0 0-4 0v3"/><path d="M18 4.933V21"/><path d="m4 6 7.106-3.79a2 2 0 0 1 1.788 0L20 6"/><path d="m6 11-3.52 2.147a1 1 0 0 0-.48.854V19a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5a1 1 0 0 0-.48-.853L18 11"/><path d="M6 4.933V21"/><circle cx="12" cy="9" r="2"/></symbol><symbol id="chevrons-up-down" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></symbol><symbol id="layout-grid" viewBox="0 0 24 24"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></symbol><symbol id="hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></symbol><symbol id="monitor-cog" viewBox="0 0 24 24"><path d="M12 17v4"/><path d="m14.305 7.53.923-.382"/><path d="m15.228 4.852-.923-.383"/><path d="m16.852 3.228-.383-.924"/><path d="m16.852 8.772-.383.923"/><path d="m19.148 3.228.383-.924"/><path d="m19.53 9.696-.382-.924"/><path d="m20.772 4.852.924-.383"/><path d="m20.772 7.148.924.383"/><path d="M22 13v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/><path d="M8 21h8"/><circle cx="18" cy="6" r="3"/></symbol><symbol id="folder-sync" viewBox="0 0 24 24"><path d="M9 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v.5"/><path d="M12 10v4h4"/><path d="m12 14 1.535-1.605a5 5 0 0 1 8 1.5"/><path d="M22 22v-4h-4"/><path d="m22 18-1.535 1.605a5 5 0 0 1-8-1.5"/></symbol><symbol id="keyboard" viewBox="0 0 24 24"><path d="M10 8h.01"/><path d="M12 12h.01"/><path d="M14 8h.01"/><path d="M16 12h.01"/><path d="M18 8h.01"/><path d="M6 8h.01"/><path d="M7 16h10"/><path d="M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/></symbol><symbol id="clipboard-list" viewBox="0 0 24 24"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></symbol><symbol id="plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol><symbol id="moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></symbol><symbol id="settings" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></symbol><symbol id="presentation" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"/><path d="m7 21 5-5 5 5"/></symbol><symbol id="search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></symbol><symbol id="rows-3" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M21 9H3"/><path d="M21 15H3"/></symbol><symbol id="screen-share" viewBox="0 0 24 24"><path d="M13 3H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-3"/><path d="M8 21h8"/><path d="M12 17v4"/><path d="m17 8 5-5"/><path d="M17 3h5v5"/></symbol><symbol id="lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol><symbol id="message-square" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></symbol><symbol id="file-up" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M12 12v6"/><path d="m15 15-3-3-3 3"/></symbol><symbol id="folder-down" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><path d="M12 10v6"/><path d="m15 13-3 3-3-3"/></symbol><symbol id="wifi-off" viewBox="0 0 24 24"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/></symbol><symbol id="unplug" viewBox="0 0 24 24"><path d="m19 5 3-3"/><path d="m2 22 3-3"/><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z"/><path d="M7.5 13.5 10 11"/><path d="M10.5 16.5 13 14"/><path d="m12 6 6 6 2.3-2.3a2.4 2.4 0 0 0 0-3.4l-2.6-2.6a2.4 2.4 0 0 0-3.4 0Z"/></symbol><symbol id="list-checks" viewBox="0 0 24 24"><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/></symbol><symbol id="link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol><symbol id="maximize-2" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/><path d="M9 21H3v-6"/></symbol><symbol id="mouse-pointer-click" viewBox="0 0 24 24"><path d="M14 4.1 12 6"/><path d="m5.1 8-2.9-.8"/><path d="m6 12-1.9 2"/><path d="M7.2 2.2 8 5.1"/><path d="M9.037 9.69a.498.498 0 0 1 .653-.653l11 4.5a.5.5 0 0 1-.074.949l-4.349 1.041a1 1 0 0 0-.74.739l-1.04 4.35a.5.5 0 0 1-.95.074z"/></symbol><symbol id="camera" viewBox="0 0 24 24"><path d="M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z"/><circle cx="12" cy="13" r="3"/></symbol><symbol id="file-down" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/></symbol><symbol id="rotate-cw" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol><symbol id="power" viewBox="0 0 24 24"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></symbol><symbol id="x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol><symbol id="sparkles" viewBox="0 0 24 24"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></symbol><symbol id="monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></symbol><symbol id="globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol><symbol id="check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol><symbol id="monitor-off" viewBox="0 0 24 24"><path d="M12 17v4"/><path d="M17 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 1.184-1.826"/><path d="m2 2 20 20"/><path d="M8 21h8"/><path d="M8.656 3H20a2 2 0 0 1 2 2v10a2 2 0 0 1-.293 1.042"/></symbol></svg>
+<div class="note">TASLAK · sahte veri</div>
+
+<div class="app">
+  <aside class="side">
+    <div class="brand"><span class="logo"><svg class="ic" style="width:17px;height:17px"><use href="#cast"/></svg></span><div><b>OpenClass</b><small>Öğretmen konsolu</small></div></div>
+
+    <button class="classbtn" id="openClass" title="Sınıf değiştir">
+      <span class="dot"><svg class="ic"><use href="#school"/></svg></span>
+      <span class="t"><span>Sınıf</span><b>Lab 1</b></span>
+      <svg class="ic"><use href="#chevrons-up-down"/></svg>
+    </button>
+
+    <nav class="nav">
+      <button class="on"><svg class="ic"><use href="#layout-grid"/></svg>İzleme</button>
+      <button><svg class="ic"><use href="#hand"/></svg>Yardım talepleri<span class="badge">2</span></button>
+      <button><svg class="ic"><use href="#monitor-cog"/></svg>Cihazlar<span class="count">16</span></button>
+      <button><svg class="ic"><use href="#folder-sync"/></svg>Dosya aktarımları</button>
+      <button><svg class="ic"><use href="#keyboard"/></svg>Klavye izleme</button>
+      <button><svg class="ic"><use href="#clipboard-list"/></svg>Kayıtlar</button>
+    </nav>
+
+    <nav class="nav">
+      <h6>Sınıflar</h6>
+      <button class="cls on"><i class="lamp"></i>Lab 1<span class="count">12/16</span></button>
+      <button class="cls"><i class="lamp"></i>Lab 2<span class="count">3/4</span></button>
+      <button id="newClass"><svg class="ic"><use href="#plus"/></svg>Yeni sınıf</button>
+    </nav>
+
+    <div class="grow"></div>
+    <div class="me">
+      <span class="av">CG</span>
+      <span class="t"><b>Cihan Güngör</b><span>LAB1-OGR</span></span>
+      <button id="theme" title="Tema"><svg class="ic"><use href="#moon"/></svg></button>
+      <button title="Ayarlar"><svg class="ic"><use href="#settings"/></svg></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="top">
+      <div><h1>Lab 1</h1><div class="sub">11-A Bilişim · adı LAB1 ile başlayan bilgisayarlar</div></div>
+      <div class="pills">
+        <span class="pill ok"><i></i>12 bağlı</span>
+        <span class="pill"><i></i>4 çevrimdışı</span>
+        <span class="pill warn"><svg class="ic"><use href="#hand"/></svg>2 yardım</span>
+      </div>
+      <span class="live" id="live"><svg class="ic"><use href="#presentation"/></svg><span id="liveText"></span><button id="liveStop">Durdur</button></span>
+      <div class="sp"></div>
+      <label class="search"><svg class="ic"><use href="#search"/></svg><input placeholder="Bilgisayar adı, oda veya IP ara"></label>
+      <input class="size" type="range" min="170" max="320" value="208" id="size" title="Küçük resim boyutu">
+      <div class="seg"><button class="on" title="Küçük resimler"><svg class="ic"><use href="#layout-grid"/></svg></button><button title="Liste"><svg class="ic"><use href="#rows-3"/></svg></button></div>
+    </div>
+
+    <div class="bar">
+      <div class="scope"><span>Uygulanacak</span><b id="scope">Tüm sınıf (12)</b></div>
+      <button class="act primary"><span class="tile"><svg class="ic"><use href="#screen-share"/></svg></span>Ekranımı Yayınla</button>
+      <div class="pair red"><span class="tile"><svg class="ic"><use href="#lock"/></svg></span><button>Kilitle</button><button>Aç</button></div>
+      <button class="act violet"><span class="tile"><svg class="ic"><use href="#message-square"/></svg></span>Mesaj</button>
+      <span class="sep"></span>
+      <button class="act teal"><span class="tile"><svg class="ic"><use href="#file-up"/></svg></span>Gönder</button>
+      <button class="act teal"><span class="tile"><svg class="ic"><use href="#folder-down"/></svg></span>Topla</button>
+      <span class="sep"></span>
+      <div class="pair amber"><span class="tile"><svg class="ic"><use href="#wifi-off"/></svg></span><button>İnterneti Kes</button><button>Aç</button></div>
+      <button class="tg" id="usb" title="USB bellekleri kapatır; bağlantı kopunca kendiliğinden açılır"><svg class="ic"><use href="#unplug"/></svg>USB'yi Kes</button>
+      <span class="sp"></span>
+      <button class="act ghost" title="Gönderimler"><svg class="ic"><use href="#list-checks"/></svg></button>
+      <button class="act ghost" title="Cihaz eşleştir"><svg class="ic"><use href="#link"/></svg></button>
+    </div>
+
+    <div class="gridwrap"><div class="grid" id="grid"></div></div>
+  </main>
+</div>
+
+<div class="selbar" id="selbar">
+  <span class="n"><em id="selcount">0</em>seçili</span>
+  <span class="sep"></span>
+  <button class="one"><svg class="ic"><use href="#maximize-2"/></svg>Büyüt</button>
+  <button class="one"><svg class="ic"><use href="#mouse-pointer-click"/></svg>Kontrolü al</button>
+  <button class="one" id="showClass"><svg class="ic"><use href="#presentation"/></svg>Sınıfa göster</button>
+  <button class="one"><svg class="ic"><use href="#camera"/></svg>Görüntü al</button>
+  <button class="one"><svg class="ic"><use href="#file-down"/></svg>Dosya al</button>
+  <button class="one"><svg class="ic"><use href="#keyboard"/></svg>Klavye</button>
+  <span class="sep"></span>
+  <button class="one x warn" title="Yeniden başlat"><svg class="ic"><use href="#rotate-cw"/></svg></button>
+  <button class="one x warn" title="Bilgisayarı kapat"><svg class="ic"><use href="#power"/></svg></button>
+  <span class="sep"></span>
+  <button class="x" id="clear" title="Seçimi kaldır"><svg class="ic"><use href="#x"/></svg></button>
+</div>
+
+<div class="veil" id="veil">
+  <div class="dlg">
+    <header><h2>Hangi sınıfla çalışacaksınız?</h2><p>Yalnızca seçtiğiniz sınıfın bilgisayarları bağlanır.</p></header>
+    <div class="body">
+      <div class="hint"><svg class="ic"><use href="#sparkles"/></svg><span>Bu bilgisayarın adı <b>LAB2-OGR</b>. <b>LAB2</b> için sınıf oluşturulsun mu?</span><button class="go">Oluştur</button></div>
+      <button class="opt on"><span class="ico"><svg class="ic" style="width:19px;height:19px"><use href="#monitor"/></svg></span><span class="t"><b>Lab 1</b><span>Adı LAB1 ile başlayanlar</span></span><span class="cnt">12<small> / 16 bağlı</small></span></button>
+      <button class="opt"><span class="ico"><svg class="ic" style="width:19px;height:19px"><use href="#monitor"/></svg></span><span class="t"><b>Lab 2</b><span>Adı LAB2 ile başlayanlar</span></span><span class="cnt">3<small> / 4 bağlı</small></span></button>
+      <button class="opt"><span class="ico"><svg class="ic" style="width:19px;height:19px"><use href="#globe"/></svg></span><span class="t"><b>Tüm bilgisayarlar</b><span>Ağdaki her öğrenci bilgisayarı kodsuz kabul edilir</span></span></button>
+      <button class="addc"><svg class="ic"><use href="#plus"/></svg>Yeni sınıf</button>
+    </div>
+    <footer><label><input type="checkbox">Açılışta sorma</label><button class="btn" id="closeDlg">Vazgeç</button><button class="btn pri" id="startDlg">Başlat</button></footer>
+  </div>
+</div>
+
+<script>
+const ic = (n, s = "") => `<svg class="ic" ${s}><use href="#${n}"/></svg>`;
+const rnd = (seed) => () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+const screens = {
+  code(r) { const cols = ["#7aa2ff", "#c792ea", "#7fdbca", "#f78c6c", "#5d6b8a"]; let h = "";
+    for (let i = 0; i < 13; i++) { const ind = 6 + Math.floor(r() * 4) * 5; h += `<i style="top:${7 + i * 6.3}%;left:${ind}%;width:${10 + r() * 45}%;background:${cols[Math.floor(r() * 5)]}"></i>`; }
+    return `<div class="scr code">${h}<div class="bar2"></div></div>`; },
+  doc(r) { let h = ""; for (let i = 0; i < 11; i++) h += `<i style="top:${10 + i * 7.6}%;width:${i === 0 ? 45 : 55 + r() * 25}%;${i === 0 ? "background:#59647c;height:4.5%" : ""}"></i>`;
+    return `<div class="scr doc"><div class="pg">${h}</div><div class="bar2"></div></div>`; },
+  web(r) { const g = [["#4d83ff", "#8f6bff"], ["#ff8a5b", "#ffc15e"], ["#18b39b", "#6bd3ff"]][Math.floor(r() * 3)];
+    return `<div class="scr web"><div class="tb"></div><div class="hero" style="background:linear-gradient(120deg,${g[0]},${g[1]})"></div><i style="left:6%"></i><i style="left:36.5%"></i><i style="left:67%"></i><div class="bar2"></div></div>`; },
+  sheet(r) { let h = ""; for (let i = 0; i < 5; i++) h += `<i style="left:${12.5 * Math.floor(r() * 7)}%;top:${9 * (1 + Math.floor(r() * 8))}%;width:12.5%;height:${9 * (1 + Math.floor(r() * 3))}%"></i>`;
+    return `<div class="scr sheet"><div class="hd"></div>${h}<div class="bar2"></div></div>`; },
+  desk(r) { const g = [["#1b2b5e", "#7b3fa0"], ["#0f4c5c", "#2f9e8f"], ["#3a1c71", "#d76d77"]][Math.floor(r() * 3)];
+    return `<div class="scr desk" style="background:linear-gradient(135deg,${g[0]},${g[1]})"><div class="w" style="left:12%;top:14%;width:48%;height:52%"></div><div class="w" style="left:46%;top:32%;width:42%;height:46%;opacity:.85"></div><div class="bar2"></div></div>`; },
+};
+const kinds = ["code", "doc", "web", "sheet", "desk"];
+// Kartın ikinci satırı: öğretmenin verdiği görünen ad varsa o, yoksa IP adresi.
+const names = { 2: "1. sıra sol", 6: "Projeksiyon yanı" };
+const devices = Array.from({ length: 16 }, (_, i) => ({
+  host: "LAB1" + String(i + 1).padStart(2, "0"), sub: names[i] ?? `192.168.1.${21 + i}`, kind: kinds[i % 5],
+  offline: [3, 8, 14, 15].includes(i), help: i === 4 || i === 9, usb: i === 1 || i === 2,
+  nostream: i === 6, pending: i === 11,
+}));
+const selected = new Set(location.hash === "#iki" ? ["LAB102", "LAB106"] : ["LAB102"]);
+const grid = document.getElementById("grid");
+function render() {
+  grid.innerHTML = devices.map((d, i) => {
+    const cls = ["card", d.offline && "offline", d.help && "help", selected.has(d.host) && "sel"].filter(Boolean).join(" ");
+    const shot = d.offline
+      ? `<div class="off">${ic("wifi-off")}Ağda görünüyor, bağlı değil</div>`
+      : d.nostream
+        ? `<div class="over" style="backdrop-filter:none;background:#0d1220;color:#6b7690">${ic("monitor-off")}Ekran yayını kapalı</div>`
+        : screens[d.kind](rnd(i * 77 + 5));
+    return `<div class="${cls}" data-h="${d.host}">
+      <div class="shot">${d.offline ? "" : `<span class="check">${ic("check")}</span>`}${d.help ? `<span class="tag">${ic("hand")}Yardım</span>` : ""}${shot}</div>
+      <div class="meta"><i class="st"></i><span class="n"><b>${d.host}</b><span>${d.offline ? "Son görülme 09:12" : d.sub}</span></span>
+      <span class="fl">${d.pending ? `<span class="badge2">Bekliyor</span>` : ""}${d.usb ? `<span class="w" title="USB bellekler kısıtlı">${ic("unplug")}</span>` : ""}</span></div></div>`;
+  }).join("");
+  const n = selected.size;
+  document.getElementById("selbar").classList.toggle("show", n > 0);
+  document.getElementById("selcount").textContent = n;
+  document.getElementById("scope").textContent = n ? `${n} seçili bilgisayar` : "Tüm sınıf (12)";
+  // Bu komutlar tek bilgisayara uygulanır.
+  document.querySelectorAll("#selbar .one").forEach((b) => (b.disabled = n !== 1));
+}
+grid.addEventListener("click", (e) => { const c = e.target.closest(".card"); if (!c || c.classList.contains("offline")) return;
+  const h = c.dataset.h; selected.has(h) ? selected.delete(h) : selected.add(h); render(); });
+document.getElementById("clear").onclick = () => { selected.clear(); render(); };
+document.getElementById("theme").onclick = () => { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "dark" ? "light" : "dark"; };
+const veil = document.getElementById("veil");
+document.getElementById("openClass").onclick = () => veil.classList.add("show");
+for (const id of ["closeDlg", "startDlg"]) document.getElementById(id).onclick = () => veil.classList.remove("show");
+veil.onclick = (e) => { if (e.target === veil) veil.classList.remove("show"); };
+document.querySelectorAll(".opt").forEach((o) => (o.onclick = () => { document.querySelectorAll(".opt").forEach((x) => x.classList.remove("on")); o.classList.add("on"); }));
+const usb = document.getElementById("usb");
+usb.onclick = () => { const on = usb.classList.toggle("on"); usb.lastChild.textContent = on ? "USB'yi Aç" : "USB'yi Kes"; };
+const live = document.getElementById("live");
+document.getElementById("showClass").onclick = () => { document.getElementById("liveText").textContent = `${[...selected][0]} ekranı sınıfa gösteriliyor`; live.classList.add("show"); };
+document.getElementById("liveStop").onclick = () => live.classList.remove("show");
+document.getElementById("size").oninput = (e) => (grid.style.gridTemplateColumns = `repeat(auto-fill, minmax(${e.target.value}px, 1fr))`);
+document.getElementById("newClass").onclick = () => veil.classList.add("show");
+document.querySelectorAll(".cls").forEach((c) => (c.onclick = () => { document.querySelectorAll(".cls").forEach((x) => x.classList.remove("on")); c.classList.add("on"); }));
+if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";
+if (location.hash === "#sinif") veil.classList.add("show");
+render();
+</script>
+</body>
+</html>

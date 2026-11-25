@@ -64,6 +64,11 @@ pub enum AuditKind {
     FileDownloaded,
     FileCollectionRequested,
     DeviceShutdown,
+    DeviceRestarted,
+    ScreenshotSaved,
+    StudentScreenShown,
+    UsbBlocked,
+    UsbUnblocked,
 }
 
 impl AuditKind {
@@ -91,6 +96,11 @@ impl AuditKind {
             Self::InternetUnblocked => "internet_unblocked",
             Self::FileCollectionRequested => "file_collection_requested",
             Self::DeviceShutdown => "device_shutdown",
+            Self::DeviceRestarted => "device_restarted",
+            Self::ScreenshotSaved => "screenshot_saved",
+            Self::StudentScreenShown => "student_screen_shown",
+            Self::UsbBlocked => "usb_blocked",
+            Self::UsbUnblocked => "usb_unblocked",
         }
     }
 }

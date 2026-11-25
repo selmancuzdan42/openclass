@@ -289,7 +289,12 @@ pub async fn stop_screen_streams(
 pub async fn focus_device(state: State<'_, Arc<AppState>>, device_id: String) -> CmdResult<()> {
     let focused = parse_id(&device_id)?;
 
+    // Ekranı sınıfa gösterilen cihaz yayın kalitesinde kalır.
+    let relayed = state.broadcast_source();
     for (id, tx) in state.registry.all_senders() {
+        if Some(id) == relayed {
+            continue;
+        }
         let flags = state.registry.flags(id);
         if !flags.streaming && id != focused {
             continue;
@@ -325,8 +330,9 @@ pub async fn focus_device(state: State<'_, Arc<AppState>>, device_id: String) ->
 /// Büyütmeden çıkar: tüm yayınlar önizleme kalitesine döner.
 #[tauri::command]
 pub async fn unfocus_devices(state: State<'_, Arc<AppState>>) -> CmdResult<()> {
+    let relayed = state.broadcast_source();
     for (id, tx) in state.registry.all_senders() {
-        if !state.registry.flags(id).streaming {
+        if !state.registry.flags(id).streaming || Some(id) == relayed {
             continue;
         }
         let _ = tx
@@ -426,12 +432,23 @@ pub struct ServerInfo {
     pub active_room: Option<String>,
     /// Konsolun süzdüğü bilgisayar adı ön eki.
     pub active_prefix: Option<String>,
+    /// Açılışta sınıf seçim penceresi gösterilsin mi?
+    pub ask_at_startup: bool,
+    /// Bu (öğretmen) bilgisayarının adı.
+    pub hostname: String,
+    /// Bilgisayar adından çıkarılan laboratuvar ön eki önerisi (`LAB1-OGR` → `LAB1`).
+    pub suggested_prefix: Option<String>,
     /// Ağ servisleri başlatılamadıysa sebebi; arayüz bunu kalıcı gösterir.
     pub network_error: Option<String>,
 }
 
 #[tauri::command]
 pub fn get_server_info(state: State<'_, Arc<AppState>>) -> CmdResult<ServerInfo> {
+    // Bilgisayar adı çalışma boyunca değişmez; arayüz bu komutu sık çağırır.
+    static HOSTNAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let hostname = HOSTNAME
+        .get_or_init(openclass_common::machine::hostname)
+        .clone();
     let cfg = state.config.read();
     Ok(ServerInfo {
         teacher_id: state.teacher_id.to_string(),
@@ -446,6 +463,9 @@ pub fn get_server_info(state: State<'_, Arc<AppState>>) -> CmdResult<ServerInfo>
         setup_completed: cfg.setup_completed,
         active_room: cfg.active_room.clone(),
         active_prefix: cfg.active_prefix.clone(),
+        ask_at_startup: cfg.ask_at_startup,
+        suggested_prefix: crate::config::suggest_prefix_from_hostname(&hostname),
+        hostname,
         network_error: state.network_error.read().clone(),
     })
 }
@@ -473,6 +493,8 @@ fn local_addresses() -> Vec<String> {
 }
 
 /// Öğretmen adı, sınıf adı ve ek keşif hedeflerini günceller.
+// Arayüz her alanı ayrı ve isteğe bağlı gönderir; tek tek argüman bu yüzden.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn update_settings(
     state: State<'_, Arc<AppState>>,
@@ -482,6 +504,7 @@ pub fn update_settings(
     setup_completed: Option<bool>,
     active_room: Option<String>,
     active_prefix: Option<String>,
+    ask_at_startup: Option<bool>,
 ) -> CmdResult<()> {
     {
         let mut cfg = state.config.write();
@@ -506,6 +529,9 @@ pub fn update_settings(
         }
         if let Some(done) = setup_completed {
             cfg.setup_completed = done;
+        }
+        if let Some(ask) = ask_at_startup {
+            cfg.ask_at_startup = ask;
         }
         // Boş metin "bütün laboratuvarlar" demektir; `None` ile aynı sonucu
         // verir ama arayüzün seçimi açıkça temizlemesine izin verir.
@@ -560,9 +586,7 @@ pub fn save_group(state: State<'_, Arc<AppState>>, name: String, prefix: String)
     if name.is_empty() {
         return Err("Grup adı boş olamaz.".into());
     }
-    if prefix.is_empty() {
-        return Err("Bilgisayar adı ön eki boş olamaz.".into());
-    }
+    // Ön ek boş olabilir: o durumda grup yalnızca oda adına göre eşleşir.
 
     {
         let mut cfg = state.config.write();
@@ -724,6 +748,15 @@ fn derive_group_suggestions(hostnames: &[String]) -> Vec<GroupSuggestion> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn dosya_adi_parcasi_klasor_disina_cikamaz() {
+        assert_eq!(safe_file_part("LAB101"), "LAB101");
+        assert_eq!(safe_file_part("../../etc/passwd"), "______etc_passwd");
+        assert_eq!(safe_file_part("C:\\Windows"), "C__Windows");
+        assert_eq!(safe_file_part("2026-11-25_22-40-05"), "2026-11-25_22-40-05");
+        assert_eq!(safe_file_part("   "), "ekran");
+    }
+
     fn hosts(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
     }
@@ -784,6 +817,24 @@ pub struct BroadcastInfo {
     /// Sıfırdan büyükse laboratuvar anahtarı IGMP'yi süzüyor olabilir;
     /// öğretmenin bunu görmesi sorunu teşhis etmesini sağlar.
     pub fallback_count: usize,
+    /// Yayın bir öğrenci ekranının yansıtmasıysa o cihaz.
+    pub source_device_id: Option<String>,
+    /// Yansıtılan öğrencinin bilgisayar adı.
+    pub source_name: Option<String>,
+}
+
+impl BroadcastInfo {
+    fn of(handle: &crate::broadcast::BroadcastHandle, fallback_count: usize) -> Self {
+        Self {
+            broadcast_id: handle.broadcast_id.to_string(),
+            started_at: handle.started_at,
+            fullscreen: handle.fullscreen,
+            multicast: handle.multicast.is_some(),
+            fallback_count,
+            source_device_id: handle.source.as_ref().map(|s| s.device_id.to_string()),
+            source_name: handle.source.as_ref().map(|s| s.hostname.clone()),
+        }
+    }
 }
 
 /// Öğretmen ekranını bağlı öğrencilere yayınlamaya başlar.
@@ -805,14 +856,48 @@ pub fn start_broadcast(
 
     let handle = crate::broadcast::start(Arc::clone(&state), fullscreen)
         .map_err(|e| fail("Ekran yayını başlatılamadı", e))?;
-    let info = BroadcastInfo {
-        broadcast_id: handle.broadcast_id.to_string(),
-        started_at: handle.started_at,
-        fullscreen: handle.fullscreen,
-        multicast: handle.multicast.is_some(),
-        fallback_count: 0,
-    };
+    let info = BroadcastInfo::of(&handle, 0);
     *state.broadcast.write() = Some(handle);
+    state.emit("broadcast-changed", Some(&info));
+    Ok(info)
+}
+
+/// Seçili öğrencinin ekranını sınıfın geri kalanına gösterir.
+///
+/// Öğretmen yayınıyla aynı anda çalışmaz ve aynı komutla
+/// ([`stop_broadcast`]) durdurulur.
+#[tauri::command]
+pub async fn show_student_screen(
+    state: State<'_, Arc<AppState>>,
+    device_id: String,
+    fullscreen: bool,
+) -> CmdResult<BroadcastInfo> {
+    let id = parse_id(&device_id)?;
+    if state.broadcasting() {
+        return Err("Zaten açık bir ekran yayını var. Önce onu durdurun.".into());
+    }
+    if state.registry.online_count() < 2 {
+        return Err("Ekranı gösterecek başka bağlı öğrenci yok.".into());
+    }
+
+    let handle = crate::broadcast::start_relay(Arc::clone(&state), id, fullscreen)
+        .await
+        .map_err(|e| fail("Öğrenci ekranı gösterilemedi", e))?;
+    let info = BroadcastInfo::of(&handle, 0);
+    {
+        // Araya başka bir yayın girdiyse bu yansıtma hemen durdurulur.
+        let mut slot = state.broadcast.write();
+        if slot.is_some() {
+            handle.stop();
+            return Err("Zaten açık bir ekran yayını var. Önce onu durdurun.".into());
+        }
+        *slot = Some(handle);
+    }
+    state.db.audit(
+        AuditKind::StudentScreenShown,
+        Some(id),
+        info.source_name.as_deref(),
+    );
     state.emit("broadcast-changed", Some(&info));
     Ok(info)
 }
@@ -832,13 +917,11 @@ pub fn stop_broadcast(state: State<'_, Arc<AppState>>) -> CmdResult<()> {
 
 #[tauri::command]
 pub fn get_broadcast(state: State<'_, Arc<AppState>>) -> CmdResult<Option<BroadcastInfo>> {
-    Ok(state.broadcast.read().as_ref().map(|h| BroadcastInfo {
-        broadcast_id: h.broadcast_id.to_string(),
-        started_at: h.started_at,
-        fullscreen: h.fullscreen,
-        multicast: h.multicast.is_some(),
-        fallback_count: state.broadcast_fallback.read().len(),
-    }))
+    Ok(state
+        .broadcast
+        .read()
+        .as_ref()
+        .map(|h| BroadcastInfo::of(h, state.broadcast_fallback.read().len())))
 }
 
 // ----------------------------------------------------- uzaktan kontrol
@@ -1517,4 +1600,189 @@ pub async fn shutdown_device(state: State<'_, Arc<AppState>>, device_id: String)
     state.db.audit(AuditKind::DeviceShutdown, Some(id), None);
     tracing::info!(%id, "uzaktan kapatma komutu gönderildi");
     Ok(())
+}
+
+/// 0.5.1 ile gelen komutları anlamayan ajanlar için kullanıcıya gösterilen hata.
+const OLD_AGENT: &str =
+    "Bu bilgisayardaki OpenClass Student sürümü bu komutu desteklemiyor (0.5.1 veya üstü gerekir).";
+
+/// Seçili öğrencinin bilgisayarını yeniden başlatır.
+///
+/// Kapatma ile aynı kurallar: arayüz onay alır, tek cihaza uygulanır ve
+/// öğrenciye önce kısa bir bildirim gösterilir.
+#[tauri::command]
+pub async fn restart_device(state: State<'_, Arc<AppState>>, device_id: String) -> CmdResult<()> {
+    let id = parse_id(&device_id)?;
+    let Some(tx) = state.registry.sender(id) else {
+        return Err("Cihaz bağlı değil.".into());
+    };
+    if !state
+        .registry
+        .supports(id, openclass_protocol::MIN_AGENT_FOR_0_5_1_COMMANDS)
+    {
+        return Err(OLD_AGENT.into());
+    }
+    tx.send(ServerMessage::RestartDevice)
+        .await
+        .map_err(|_| "Cihazla bağlantı kapandı.".to_string())?;
+    state.db.audit(AuditKind::DeviceRestarted, Some(id), None);
+    tracing::info!(%id, "uzaktan yeniden başlatma komutu gönderildi");
+    Ok(())
+}
+
+/// Seçili öğrencilerde USB depolamayı (bellek, harici disk) kısıtlar ya da açar.
+///
+/// Dönen değer komutun gönderildiği cihaz sayısıdır; gerçek sonuç öğrencinin
+/// `UsbBlockAck` cevabıyla cihaz görünümüne yansır. Kısıtlama oturuma
+/// bağlıdır: bağlantı kopunca öğrenci ajanı onu kendiliğinden kaldırır.
+#[tauri::command]
+pub async fn block_usb(
+    state: State<'_, Arc<AppState>>,
+    device_ids: Vec<String>,
+    block: bool,
+) -> CmdResult<usize> {
+    if device_ids.is_empty() {
+        return Err("Cihaz seçilmedi.".into());
+    }
+
+    let mut sent = 0usize;
+    let mut unsupported = 0usize;
+    for raw in &device_ids {
+        let id = parse_id(raw)?;
+        let Some(tx) = state.registry.sender(id) else {
+            continue;
+        };
+        if !state
+            .registry
+            .supports(id, openclass_protocol::MIN_AGENT_FOR_0_5_1_COMMANDS)
+        {
+            unsupported += 1;
+            continue;
+        }
+        if tx.send(ServerMessage::UsbBlock { block }).await.is_err() {
+            continue;
+        }
+        let kind = if block {
+            AuditKind::UsbBlocked
+        } else {
+            AuditKind::UsbUnblocked
+        };
+        state.db.audit(kind, Some(id), None);
+        sent += 1;
+    }
+
+    if sent == 0 {
+        return Err(if unsupported > 0 {
+            OLD_AGENT.into()
+        } else {
+            "Hiçbir cihaza ulaşılamadı.".into()
+        });
+    }
+    tracing::info!(
+        adet = sent,
+        eski_surum = unsupported,
+        block,
+        "USB kısıtlaması gönderildi"
+    );
+    Ok(sent)
+}
+
+// ------------------------------------------------------ ekran görüntüsü
+
+/// Kaydedilebilecek en büyük ekran görüntüsü.
+const MAX_SCREENSHOT_BYTES: usize = 32 * 1024 * 1024;
+
+/// Ekran görüntülerinin kaydedildiği klasör: `Resimler/OpenClass`.
+fn screenshots_dir() -> anyhow::Result<std::path::PathBuf> {
+    use anyhow::Context;
+    let dirs = directories::UserDirs::new().context("kullanıcı klasörü belirlenemedi")?;
+    let base = dirs
+        .picture_dir()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| dirs.home_dir().join("Pictures"));
+    let dir = base.join("OpenClass");
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("klasör oluşturulamadı: {}", dir.display()))?;
+    Ok(dir)
+}
+
+/// Dosya adında kullanılacak parçayı güvenli hâle getirir.
+///
+/// Bilgisayar adı öğrencinin beyanıdır; yol ayırıcı ya da `..` içeren bir ad
+/// dosyayı klasörün dışına taşıyamamalı.
+fn safe_file_part(raw: &str) -> String {
+    let cleaned: String = raw
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(64)
+        .collect();
+    if cleaned.is_empty() {
+        "ekran".to_string()
+    } else {
+        cleaned
+    }
+}
+
+/// Öğretmenin o an gördüğü öğrenci ekranını PNG olarak diske kaydeder.
+///
+/// Görüntü arayüzdeki tuvalden gelir (bölgeler orada birleştirilir).
+/// Kayıt **yalnızca öğretmenin açık komutuyla** yapılır ve denetim günlüğüne
+/// yazılır; ekranlar kendiliğinden hiçbir zaman diske yazılmaz.
+///
+/// `stamp` dosya adındaki yerel tarih-saat parçasıdır (`2026-11-25_22-40-05`).
+#[tauri::command]
+pub fn save_screenshot(
+    state: State<'_, Arc<AppState>>,
+    device_id: String,
+    hostname: String,
+    stamp: String,
+    png: Vec<u8>,
+) -> CmdResult<String> {
+    let id = parse_id(&device_id)?;
+    if png.len() > MAX_SCREENSHOT_BYTES {
+        return Err("Ekran görüntüsü çok büyük.".into());
+    }
+    if !png.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err("Ekran görüntüsü geçerli bir PNG değil.".into());
+    }
+
+    let dir = screenshots_dir().map_err(|e| fail("Ekran görüntüsü klasörü açılamadı", e))?;
+    let stem = format!("{}_{}", safe_file_part(&hostname), safe_file_part(&stamp));
+    // Aynı saniyede ikinci kayıt öncekinin üzerine yazmasın.
+    let path = (0..100)
+        .map(|n| {
+            if n == 0 {
+                dir.join(format!("{stem}.png"))
+            } else {
+                dir.join(format!("{stem}_{n}.png"))
+            }
+        })
+        .find(|p| !p.exists())
+        .ok_or_else(|| "Ekran görüntüsü için boş dosya adı bulunamadı.".to_string())?;
+
+    std::fs::write(&path, &png).map_err(|e| fail("Ekran görüntüsü kaydedilemedi", e))?;
+    let shown = path.to_string_lossy().into_owned();
+    state
+        .db
+        .audit(AuditKind::ScreenshotSaved, Some(id), Some(&hostname));
+    tracing::info!(%id, dosya = %shown, "ekran görüntüsü kaydedildi");
+    Ok(shown)
+}
+
+/// Ekran görüntülerinin kaydedildiği klasörü dosya yöneticisinde açar.
+#[tauri::command]
+pub fn open_screenshots_dir(app: tauri::AppHandle) -> CmdResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let dir = screenshots_dir().map_err(|e| fail("Klasör bulunamadı", e))?;
+    app.opener()
+        .open_path(dir.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|e| format!("Klasör açılamadı: {e}"))
 }

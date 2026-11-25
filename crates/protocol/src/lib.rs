@@ -52,6 +52,28 @@ pub const MAX_DISCOVERY_PACKET: usize = 1400;
 /// veya bozuk göndericilere karşı bellek koruması sağlar.
 pub const MAX_CONTROL_FRAME: usize = 8 * 1024 * 1024;
 
+/// Yeniden başlatma, USB kısıtlaması gibi 0.5.1 ile gelen komutları
+/// anlayan en eski ajan sürümü.
+///
+/// Daha eski ajanlar tanımadıkları mesajı çözemeyip bağlantıyı koparır; bu
+/// yüzden konsol bu komutları yalnızca destekleyen ajanlara gönderir.
+pub const MIN_AGENT_FOR_0_5_1_COMMANDS: (u32, u32, u32) = (0, 5, 1);
+
+/// `app_version` metni (`0.5.1`, `0.6.0-beta`) verilen asgari sürümü karşılıyor mu?
+///
+/// Çözülemeyen sürüm "karşılamıyor" sayılır: bilinmeyen bir ajana yeni komut
+/// göndermek bağlantısını koparabilir.
+pub fn version_at_least(version: &str, min: (u32, u32, u32)) -> bool {
+    let core = version.trim().split(['-', '+']).next().unwrap_or("");
+    let mut parts = core.split('.').map(|p| p.parse::<u32>());
+    let (Some(Ok(major)), Some(Ok(minor)), Some(Ok(patch)), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    (major, minor, patch) >= min
+}
+
 /// WebSocket el sıkışmasında kullanılan yol.
 pub const WS_PATH: &str = "/openclass/v1";
 
@@ -107,4 +129,28 @@ pub fn random_bytes<const N: usize>() -> [u8; N] {
     let mut buf = [0u8; N];
     getrandom::fill(&mut buf).expect("işletim sistemi rastgelelik kaynağı kullanılamıyor");
     buf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::version_at_least;
+
+    #[test]
+    fn surum_karsilastirmasi() {
+        assert!(version_at_least("0.5.1", (0, 5, 1)));
+        assert!(version_at_least("0.6.0", (0, 5, 1)));
+        assert!(version_at_least("1.0.0-beta", (0, 5, 1)));
+        assert!(!version_at_least("0.5.0", (0, 5, 1)));
+        assert!(!version_at_least("0.4.12", (0, 5, 1)));
+        // Sayısal karşılaştırma: metin sırası 0.10.0'ı 0.5.1'den küçük sayardı.
+        assert!(version_at_least("0.10.0", (0, 5, 1)));
+    }
+
+    #[test]
+    fn cozulemeyen_surum_desteklemiyor_sayilir() {
+        assert!(!version_at_least("", (0, 5, 1)));
+        assert!(!version_at_least("bilinmiyor", (0, 5, 1)));
+        assert!(!version_at_least("0.5", (0, 5, 1)));
+        assert!(!version_at_least("0.5.1.2", (0, 5, 1)));
+    }
 }

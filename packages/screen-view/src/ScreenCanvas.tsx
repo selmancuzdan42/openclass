@@ -105,7 +105,14 @@ export function ScreenCanvas({
 
   return (
     <span className="relative block size-full">
-      <canvas ref={canvasRef} className={className} role="img" aria-label={alt} />
+      <canvas
+        ref={canvasRef}
+        className={className}
+        role="img"
+        aria-label={alt}
+        // Ekran görüntüsü alınırken ilgili cihazın tuvali bununla bulunur.
+        data-screen-device={deviceId || undefined}
+      />
       {failure && (
         // Veri geldiği hâlde tuvalin siyah kalması teşhis edilmesi en zor
         // durumlardan biri; sebebi ekranda yazılır.

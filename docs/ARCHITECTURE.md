@@ -205,7 +205,7 @@ Kod tabanında bu kuralın uygulandığı yerler yorumla işaretlidir.
 | Cihaz kayıtları, denetim günlüğü | SQLite (`%APPDATA%\OpenClass\teacher\`) | Dosya sistemi |
 | TLS özel anahtarı | Ayrı dosya | DPAPI (kullanıcı kapsamı) |
 | Öğrenci cihaz kimliği | Ayrı dosya | DPAPI (makine kapsamı) |
-| Ekran görüntüleri | **Hiçbir yerde** | Diske yazılmaz |
+| Ekran görüntüleri | Kendiliğinden **hiçbir yerde**; öğretmen "Ekran görüntüsü al" derse `Resimler/OpenClass` | Yalnızca açık komutla yazılır, denetim günlüğüne işlenir |
 
 Öğrenci kimliği neden makine kapsamlı? Laboratuvar bilgisayarında farklı
 Windows hesaplarıyla oturum açan öğrenciler aynı cihaz kimliğini görmelidir;

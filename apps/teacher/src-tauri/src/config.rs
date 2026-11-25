@@ -11,7 +11,12 @@ use uuid::Uuid;
 ///
 /// Bir grup, bilgisayar adı ön ekinden ibarettir: `LAB1` grubu `LAB101`,
 /// `LAB102` … cihazlarını kapsar. Hiçbir adlandırma düzeni koda gömülü
-/// değildir; ön eki öğretmen belirler.
+/// değildir; ön eki öğretmen belirler. Ön eki boş bir grup yalnızca oda
+/// adına göre eşleşir (grup adı = oda adı).
+///
+/// Gruplar aynı zamanda açılıştaki sınıf seçim penceresinin kayıtlı
+/// sınıflarıdır: seçilen grubun ön eki (yoksa adı, oda olarak) konsolun
+/// yönettiği kapsam olur.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceGroup {
@@ -52,6 +57,11 @@ pub struct TeacherConfig {
     /// birlikte verilirse **oda önceliklidir**; ön ek yalnızca odası
     /// bilinmeyen cihazlara uygulanır.
     pub active_prefix: Option<String>,
+    /// Konsol her açılışta sınıf seçim penceresini göstersin mi?
+    ///
+    /// NetSupport'un Class Wizard'ındaki "bu pencereyi bir daha gösterme"
+    /// kutusunun tersidir. `false` iken konsol son seçilen sınıfla açılır.
+    pub ask_at_startup: bool,
     pub groups: Vec<DeviceGroup>,
 }
 
@@ -66,9 +76,27 @@ impl Default for TeacherConfig {
             setup_completed: false,
             active_room: None,
             active_prefix: None,
+            ask_at_startup: true,
             groups: Vec::new(),
         }
     }
+}
+
+/// Öğretmen bilgisayarının adından laboratuvar ön ekini tahmin eder.
+///
+/// Okullarda yaygın düzen: öğretmen `LAB1-OGR`, öğrenciler `LAB101`,
+/// `LAB102` … Sondaki "öğretmen" eki atılınca kalan kısım (`LAB1`)
+/// öğrencilerin ortak ön ekidir. Yalnızca bilinen eklerde öneri üretilir;
+/// `DESKTOP-4F9K2A` gibi adlardan tahmin yürütülmez. Sonuç bir öneridir,
+/// öğretmen onaylamadan uygulanmaz.
+pub fn suggest_prefix_from_hostname(hostname: &str) -> Option<String> {
+    const SUFFIXES: [&str; 8] = [
+        "OGRETMEN", "TEACHER", "OGRT", "OGR", "HOCA", "TCH", "MASTER", "SERVER",
+    ];
+    let host = hostname.trim().to_ascii_uppercase();
+    let stem = SUFFIXES.iter().find_map(|s| host.strip_suffix(s))?;
+    let stem = stem.trim_end_matches(['-', '_', '.', ' ']);
+    (!stem.is_empty()).then(|| stem.to_string())
 }
 
 impl TeacherConfig {
@@ -101,5 +129,39 @@ impl TeacherConfig {
         std::fs::write(path, text)
             .with_context(|| format!("yapılandırma yazılamadı: {}", path.display()))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::suggest_prefix_from_hostname;
+
+    #[test]
+    fn ogretmen_ekinden_on_ek_onerilir() {
+        assert_eq!(
+            suggest_prefix_from_hostname("LAB1-OGR").as_deref(),
+            Some("LAB1")
+        );
+        assert_eq!(
+            suggest_prefix_from_hostname("lab2_ogretmen").as_deref(),
+            Some("LAB2")
+        );
+        assert_eq!(
+            suggest_prefix_from_hostname("BIL-A-TEACHER").as_deref(),
+            Some("BIL-A")
+        );
+        assert_eq!(
+            suggest_prefix_from_hostname("LAB3OGR").as_deref(),
+            Some("LAB3")
+        );
+    }
+
+    #[test]
+    fn bilinmeyen_adlardan_tahmin_yurutulmez() {
+        assert_eq!(suggest_prefix_from_hostname("DESKTOP-4F9K2A"), None);
+        assert_eq!(suggest_prefix_from_hostname("LAB101"), None);
+        // Ekin kendisinden ibaret ad bir ön ek bırakmaz.
+        assert_eq!(suggest_prefix_from_hostname("OGR"), None);
+        assert_eq!(suggest_prefix_from_hostname("-OGR"), None);
     }
 }

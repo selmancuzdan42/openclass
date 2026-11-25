@@ -3,6 +3,57 @@
 Bu dosya [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/) biçimini,
 sürüm numaraları [Semantic Versioning](https://semver.org/lang/tr/) kurallarını izler.
 
+## [0.5.1] — 2026-11-25
+
+### Eklendi
+- **Öğrenci ekranını sınıfa yansıtma.** Seçilen öğrencinin ekranı diğer
+  öğrencilere gösterilir. Görüntü yeniden kodlanmadan öğretmen yayınının
+  taşıma yoluna (multicast + TLS yedeği) aktarılır; izleyen ajanların eski
+  sürümde olması sorun değildir. Ekranı gösterilen öğrenciye bildirilir.
+- **Ekran görüntüsü kaydetme.** Büyütülmüş görünümden ya da sağ tık
+  menüsünden o anki öğrenci ekranı `Resimler/OpenClass` altına PNG olarak
+  kaydedilir ve denetim günlüğüne yazılır. Ekranlar kendiliğinden hâlâ
+  diske yazılmaz.
+- **USB bellek kısıtlama** (Windows). Kısıtlama oturuma bağlıdır: bağlantı
+  kopunca ya da ajan yeniden başlayınca kendiliğinden kalkar. Okulun önceden
+  kapattığı ayar geri açılmaz. Klavye ve fare etkilenmez. Öğrenciye her
+  değişiklik bildirilir.
+- **Uzaktan yeniden başlatma.**
+
+### Değiştirildi
+- Ajan ve konsol tanımadıkları mesajı atlayıp bağlantıyı korur. Önceden
+  bilinmeyen bir komut oturumu koparıyordu.
+- Yeni komutlar (yeniden başlatma, USB kısıtlama) yalnızca 0.5.1 ve üstü
+  ajanlara gönderilir; eski ajanlar için konsol uyarı verir.
+
+## [0.5.0] — 2026-11-25
+
+### Eklendi
+- **Sınıf seçim penceresi.** Konsol her açılışta hangi sınıfın yönetileceğini
+  sorar (NetSupport'un Class Wizard'ı gibi). Kayıtlı sınıflar listelenir;
+  sınıf, bilgisayar adı başlangıcıyla (`LAB1`) ya da oda adıyla tanımlanır.
+  "Açılışta sorma" ile son sınıfla doğrudan açılır; durum çubuğundaki ya da
+  başlıktaki sınıf adına tıklanarak ders sırasında değiştirilir.
+- **Bilgisayar adından sınıf önerisi.** Öğretmen bilgisayarının adı
+  `LAB1-OGR` gibi bilinen bir ekle bitiyorsa `LAB1` sınıfı önerilir.
+
+### Değiştirildi
+- **Laboratuvar ayrımı artık bağlantı düzeyinde.** Konsol yönettiği kapsamı
+  (oda adı / ad başlangıcı) keşif paketinde duyurur. Öğrenci yalnızca kendisini
+  kapsayan konsola başvurur; konsol yalnızca kapsamına giren yeni cihazı
+  kendiliğinden yetkilendirir. Aynı ağdaki iki laboratuvar birbirine karışmaz.
+- **Otomatik kabul koda gömülü `LAB`/`BLAB` önekine bağlı değil.** Ölçüt
+  öğretmenin seçtiği sınıftır; `BIL101`, `PC-01` gibi adlandırmalar da çalışır.
+  Henüz sınıf seçilmemiş konsol kimseyi kendiliğinden kabul etmez; "Tüm
+  bilgisayarlar" ayrı ve açık bir seçenektir.
+- Arayüz rötuşları: kartlarda gölge ve yuvarlak köşe, pencere açılış
+  animasyonu, yeni başlık çubuğu.
+
+### Düzeltildi
+- Küçük pencerede küçük resimler sıkışıp bilgisayar adı şeridi kayboluyordu.
+- Ön eki boş (yalnızca odaya göre eşleşen) grup kaydedilemiyordu.
+- Bölmeli seçicilerin ve bilgi kutularının arka plan rengi tanımsızdı.
+
 ## [0.2.0] — 2026-11-03
 
 ### Eklendi

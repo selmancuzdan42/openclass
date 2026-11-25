@@ -24,6 +24,10 @@ pub const AUTOSTART_VAR: &str = "OPENCLASS_TEST_AUTOSTART";
 /// Öğretmen ekranı yayınını da kendiliğinden başlatan değişken.
 pub const BROADCAST_VAR: &str = "OPENCLASS_TEST_BROADCAST";
 
+/// Adı verilen öğrencinin ekranını sınıfa kendiliğinden yansıtan değişken
+/// (`OPENCLASS_TEST_RELAY=LAB101`).
+pub const RELAY_VAR: &str = "OPENCLASS_TEST_RELAY";
+
 /// Yapılandırılmış sabit eşleştirme kodu.
 ///
 /// Sürüm derlemesinde her zaman `None` döner.
@@ -99,6 +103,32 @@ pub fn spawn_autostart(state: Arc<AppState>) {
                             error = %format!("{err:#}"),
                             "TEST MODU: öğretmen ekranı yayını açılamadı"
                         );
+                    }
+                }
+            }
+
+            // İstenmişse bir öğrencinin ekranını sınıfa yansıt.
+            if !state.broadcasting() && state.registry.online_count() >= 2 {
+                if let Ok(host) = std::env::var(RELAY_VAR) {
+                    let source = state
+                        .registry
+                        .all_senders()
+                        .into_iter()
+                        .map(|(id, _)| id)
+                        .find(|id| state.registry.hostname(*id).as_deref() == Some(host.as_str()));
+                    if let Some(id) = source {
+                        match crate::broadcast::start_relay(Arc::clone(&state), id, false).await {
+                            Ok(handle) => {
+                                tracing::info!(%host, "TEST MODU: öğrenci ekranı yansıtılıyor");
+                                *state.broadcast.write() = Some(handle);
+                            }
+                            Err(err) => {
+                                tracing::error!(
+                                    error = %format!("{err:#}"),
+                                    "TEST MODU: öğrenci ekranı yansıtılamadı"
+                                );
+                            }
+                        }
                     }
                 }
             }
