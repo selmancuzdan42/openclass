@@ -3,6 +3,7 @@ import { BroadcastWindow } from "./BroadcastWindow";
 import { ActivityIndicator } from "./ActivityIndicator";
 import { LockScreen } from "./LockScreen";
 import { ConfigWindow } from "./ConfigWindow";
+import { NetBlockPage } from "./NetBlockPage";
 import { NoticeWindow } from "./NoticeWindow";
 
 /**
@@ -18,6 +19,9 @@ import { NoticeWindow } from "./NoticeWindow";
  *   dosya gezgini açıkken üstte duran, kapatılamayan şerit.
  * * **Kilit ekranı** (`?view=lock`) — klavye/fare kilitliyken nedenini
  *   açıklayan tam ekran pencere.
+ *
+ * * **İnternet kesildi sayfası** (`?view=netblock`) — internet kesikken
+ *   öndeki tarayıcının sayfa alanını kaplar.
  *
  * Öğrencinin sürekli gördüğü yüzey pencere değil, **sistem tepsisi
  * simgesidir**. Durum ve yardım talebi oradadır.
@@ -35,6 +39,10 @@ export default function App() {
 
   if (view === "lock") {
     return <LockScreen />;
+  }
+
+  if (view === "netblock") {
+    return <NetBlockPage />;
   }
 
   return (

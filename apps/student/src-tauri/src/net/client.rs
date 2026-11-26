@@ -1101,12 +1101,11 @@ async fn handle_server_message(
                         .to_string(),
                     );
                     if blocked {
-                        // Öğrenci bir tarayıcı açtığında neden site
-                        // açılmadığını görsün (bkz. `netblock::watch_browsers`).
+                        // Öğrenci bir tarayıcı açtığında sayfa alanı "internet
+                        // kesildi" sayfasıyla kaplanır (bkz.
+                        // `netblock::watch_browsers`).
                         let st = Arc::clone(state);
-                        crate::netblock::watch_browsers(move || {
-                            st.show_notice(INTERNET_BLOCKED_NOTICE.to_string());
-                        });
+                        crate::netblock::watch_browsers(move |cover| st.cover_browser(cover));
                     }
                     let _ = tx
                         .send(ClientMessage::InternetBlockAck {

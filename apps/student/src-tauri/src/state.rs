@@ -144,6 +144,8 @@ pub const ACTIVITY_WINDOW: &str = "activity";
 
 /// Kilit penceresinin etiketi.
 pub const LOCK_WINDOW: &str = "lock";
+/// İnternet kesikken tarayıcının sayfa alanını kaplayan pencerenin etiketi.
+pub const NETBLOCK_WINDOW: &str = "netblock";
 
 pub struct AppState {
     pub identity: StudentIdentity,
@@ -499,6 +501,75 @@ impl AppState {
     }
 
     /// Mesaj penceresini açar; zaten açıksa öne getirir.
+    /// "İnternet kesildi" sayfasını öndeki tarayıcının üstüne yerleştirir,
+    /// gizler ya da kapatır (bkz. [`crate::netblock::watch_browsers`]).
+    ///
+    /// Pencere ilk gerektiğinde oluşturulur ve engel kalkınca yok edilir;
+    /// arada yalnızca gizlenir, böylece tarayıcıya her dönüşte yeniden
+    /// yüklenmez.
+    pub fn cover_browser(&self, cover: crate::netblock::Cover) {
+        use crate::netblock::Cover;
+        use tauri::Manager;
+
+        let app = self.app.read().clone();
+        let Some(app) = app else { return };
+        let existing = app.get_webview_window(NETBLOCK_WINDOW);
+
+        let rect = match cover {
+            Cover::Show(rect) => rect,
+            Cover::Hide => {
+                if let Some(window) = existing {
+                    let _ = window.hide();
+                }
+                return;
+            }
+            Cover::End => {
+                if let Some(window) = existing {
+                    let _ = window.close();
+                }
+                return;
+            }
+        };
+
+        let window = match existing {
+            Some(window) => window,
+            None => {
+                let built = tauri::WebviewWindowBuilder::new(
+                    &app,
+                    NETBLOCK_WINDOW,
+                    tauri::WebviewUrl::App("index.html?view=netblock".into()),
+                )
+                .title("İnternet bağlantınız kesildi")
+                .decorations(false)
+                .resizable(false)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .focused(false)
+                .visible(false)
+                .build();
+                match built {
+                    Ok(window) => window,
+                    Err(err) => {
+                        tracing::error!(%err, "internet uyarı sayfası açılamadı");
+                        return;
+                    }
+                }
+            }
+        };
+
+        let scale = window.scale_factor().unwrap_or(1.0);
+        match crate::netblock::page_area(rect, scale) {
+            Some((x, y, width, height)) => {
+                let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+                let _ = window.set_size(tauri::PhysicalSize::new(width, height));
+                let _ = window.show();
+            }
+            None => {
+                let _ = window.hide();
+            }
+        }
+    }
+
     fn show_notice_window(&self) {
         use tauri::Manager;
 

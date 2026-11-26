@@ -249,16 +249,33 @@ pub fn is_internet_blocked() -> Result<bool, String> {
 
 // ------------------------------------------------------ tarayıcı uyarısı
 
-/// Tarayıcı kullanılırken uyarının yeniden gösterilmesi için geçmesi gereken süre.
-///
-/// Uyarı penceresi öne gelince tarayıcı arka planda kalır; öğrenci pencereyi
-/// kapatınca tarayıcı yeniden öne geçer. Bu aralık olmadan uyarı kapatıldığı
-/// anda yeniden açılırdı.
-const WARN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(90);
-
 /// Öndeki pencerenin hangi sıklıkla yoklanacağı.
+///
+/// Kaplama sayfası tarayıcı penceresini izler; pencere taşınınca gecikme
+/// göze batmasın diye aralık kısadır. Yoklama yalnızca engel sürerken çalışır.
 #[cfg(windows)]
-const WATCH_POLL: std::time::Duration = std::time::Duration::from_secs(1);
+const WATCH_POLL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Bir pencerenin ekran üzerindeki yeri (fiziksel piksel).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rect {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
+/// Kaplama sayfasına verilen komut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+pub enum Cover {
+    /// Sayfayı bu tarayıcı penceresinin üstünde göster.
+    Show(Rect),
+    /// Tarayıcı önde değil; sayfayı gizle.
+    Hide,
+    /// Engel kalktı; sayfayı kapat.
+    End,
+}
 
 /// Yaygın tarayıcıların çalıştırılabilir dosya adları (küçük harf, uzantısız).
 const BROWSERS: &[&str] = &[
@@ -288,46 +305,20 @@ fn is_browser(exe_path: &str) -> bool {
     BROWSERS.contains(&stem)
 }
 
-/// Uyarının ne zaman gösterileceğine karar verir.
-///
-/// İnternet kesikken öğrenci bir tarayıcıyı öne aldığında uyarı hemen çıkar;
-/// tarayıcıda kalmaya devam ederse [`WARN_INTERVAL`] aralığıyla yinelenir.
-#[derive(Default)]
-#[cfg_attr(not(windows), allow(dead_code))]
-struct BrowserNag {
-    last_shown: Option<std::time::Instant>,
-}
-
-#[cfg_attr(not(windows), allow(dead_code))]
-impl BrowserNag {
-    fn should_warn(&mut self, browser_in_front: bool, now: std::time::Instant) -> bool {
-        if !browser_in_front {
-            return false;
-        }
-        if self
-            .last_shown
-            .is_some_and(|t| now.duration_since(t) < WARN_INTERVAL)
-        {
-            return false;
-        }
-        self.last_shown = Some(now);
-        true
-    }
-}
-
-/// İnternet kesikken tarayıcı kullanımını izler ve `warn`'ı çağırır.
+/// İnternet kesikken tarayıcı pencerelerini izler ve kaplama sayfasını yönetir.
 ///
 /// Tarayıcının *içinde* her site için bir uyarı sayfası gösterilemez: siteler
 /// şifreli (HTTPS) açılır ve araya girmek için bilgisayara sahte bir kök
 /// sertifika kurmak gerekir; bu, o bilgisayardaki bütün şifreli bağlantıların
 /// güvenliğini bozar ve yapılmaz. Bunun yerine öğrenci herhangi bir
-/// tarayıcıyı öne aldığında OpenClass kendi uyarısını gösterir; hangi
-/// tarayıcı ya da site olduğu fark etmez.
+/// tarayıcıyı öne aldığında OpenClass, tarayıcının sayfa alanını kendi
+/// "internet kesildi" sayfasıyla kaplar; hangi tarayıcı ya da site olduğu
+/// fark etmez.
 ///
 /// İzleme yalnızca engel bu oturumda uygulanmışken çalışır ve engel kalkınca
-/// kendiliğinden biter. Yalnızca öndeki pencerenin program adına bakılır;
-/// adres, başlık ya da içerik okunmaz ve hiçbir şey kaydedilmez.
-pub fn watch_browsers(warn: impl Fn() + Send + 'static) {
+/// [`Cover::End`] ile biter. Yalnızca öndeki pencerenin program adına ve
+/// konumuna bakılır; adres, başlık ya da içerik okunmaz, hiçbir şey kaydedilmez.
+pub fn watch_browsers(cover: impl Fn(Cover) + Send + 'static) {
     #[cfg(windows)]
     {
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -338,19 +329,26 @@ pub fn watch_browsers(warn: impl Fn() + Send + 'static) {
         let spawned = std::thread::Builder::new()
             .name("openclass-browser-watch".into())
             .spawn(move || {
-                let mut nag = BrowserNag::default();
-                // Engel uygulanırken zaten bir bildirim gösterildi; öğrenci o
-                // anda tarayıcıdaysa aynı uyarı hemen ikinci kez çıkmasın.
-                if foreground_exe().is_some_and(|exe| is_browser(&exe)) {
-                    nag.last_shown = Some(std::time::Instant::now());
-                }
+                // Kaplanan tarayıcı penceresi ve en son bildirilen konumu.
+                let mut covered: Option<isize> = None;
+                let mut shown: Option<Rect> = None;
                 while APPLIED.load(Ordering::Relaxed) {
-                    let in_front = foreground_exe().is_some_and(|exe| is_browser(&exe));
-                    if nag.should_warn(in_front, std::time::Instant::now()) {
-                        warn();
+                    let target = match foreground() {
+                        Front::Browser(window) => Some(window),
+                        // Öğrenci kaplama sayfasına tıkladı: altındaki
+                        // tarayıcı hâlâ açıksa sayfa yerinde kalır.
+                        Front::Ours => covered,
+                        Front::Other => None,
+                    };
+                    let rect = target.and_then(window_rect);
+                    covered = rect.and(target);
+                    if rect != shown {
+                        cover(rect.map_or(Cover::Hide, Cover::Show));
+                        shown = rect;
                     }
                     std::thread::sleep(WATCH_POLL);
                 }
+                cover(Cover::End);
                 WATCHING.store(false, Ordering::SeqCst);
             });
         if spawned.is_err() {
@@ -359,33 +357,111 @@ pub fn watch_browsers(warn: impl Fn() + Send + 'static) {
     }
     #[cfg(not(windows))]
     {
-        let _ = warn;
+        let _ = cover;
     }
 }
 
-/// Öndeki pencerenin ait olduğu programın tam yolu.
+/// Öndeki pencerenin kime ait olduğu.
 #[cfg(windows)]
-fn foreground_exe() -> Option<String> {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
+enum Front {
+    /// Bir tarayıcı; değer pencere tutamacıdır.
+    Browser(isize),
+    /// OpenClass'ın kendi penceresi (kaplama sayfası ya da bir bildirim).
+    Ours,
+    Other,
+}
+
+#[cfg(windows)]
+fn foreground() -> Front {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetForegroundWindow, GetWindowThreadProcessId,
     };
 
-    // SAFETY: Çağrılar yalnızca okuma yapar; tutamaç kapatılır ve tampon
-    // boyutu API'ye bildirilir.
-    unsafe {
+    // SAFETY: Çağrılar yalnızca okuma yapar.
+    let (window, pid) = unsafe {
         let window = GetForegroundWindow();
         if window.is_null() {
-            return None;
+            return Front::Other;
         }
         let mut pid = 0u32;
         GetWindowThreadProcessId(window, &mut pid);
-        if pid == 0 {
+        (window, pid)
+    };
+    if pid == std::process::id() {
+        return Front::Ours;
+    }
+    match process_exe(pid) {
+        Some(exe) if is_browser(&exe) => Front::Browser(window as isize),
+        _ => Front::Other,
+    }
+}
+
+/// Pencere hâlâ açık ve görünürse ekrandaki yeri.
+#[cfg(windows)]
+fn window_rect(window: isize) -> Option<Rect> {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowRect, IsIconic, IsWindow, IsWindowVisible,
+    };
+
+    let hwnd = window as windows_sys::Win32::Foundation::HWND;
+    // SAFETY: Tutamaç geçersizse çağrılar yalnızca başarısız döner.
+    unsafe {
+        if IsWindow(hwnd) == 0 || IsWindowVisible(hwnd) == 0 || IsIconic(hwnd) != 0 {
             return None;
         }
+        let mut r = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        if GetWindowRect(hwnd, &mut r) == 0 {
+            return None;
+        }
+        Some(Rect {
+            left: r.left,
+            top: r.top,
+            right: r.right,
+            bottom: r.bottom,
+        })
+    }
+}
+
+/// Tarayıcının sekme ve adres çubuğu için bırakılan yükseklik (mantıksal piksel).
+///
+/// Kaplama sayfası yalnızca sayfa alanını örter: öğrenci sekmeleri ve
+/// tarayıcıyı kapatabilir, sayfa da tarayıcının içinde açılmış gibi görünür.
+const BROWSER_CHROME_HEIGHT: f64 = 88.0;
+
+/// Tarayıcı penceresinin sayfa alanı: `(x, y, genişlik, yükseklik)`.
+///
+/// Pencere sayfa gösterilemeyecek kadar küçükse `None`.
+pub fn page_area(window: Rect, scale: f64) -> Option<(i32, i32, u32, u32)> {
+    let chrome = (BROWSER_CHROME_HEIGHT * scale).round() as i32;
+    let width = window.right - window.left;
+    let height = window.bottom - window.top - chrome;
+    if width < 200 || height < 120 {
+        return None;
+    }
+    Some((
+        window.left,
+        window.top + chrome,
+        width as u32,
+        height as u32,
+    ))
+}
+
+/// Verilen sürecin çalıştırılabilir dosyasının tam yolu.
+#[cfg(windows)]
+fn process_exe(pid: u32) -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    // SAFETY: Tutamaç kapatılır ve tampon boyutu API'ye bildirilir.
+    unsafe {
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if process.is_null() {
             return None;
@@ -731,7 +807,6 @@ fn run_netsh(args: &[&str]) -> Result<String, String> {
 #[cfg(test)]
 mod browser_tests {
     use super::*;
-    use std::time::{Duration, Instant};
 
     #[test]
     fn tarayicilar_taninir() {
@@ -751,21 +826,24 @@ mod browser_tests {
     }
 
     #[test]
-    fn uyari_tarayici_one_gelince_cikar_ve_araliksiz_yinelenmez() {
-        let mut nag = BrowserNag::default();
-        let t0 = Instant::now();
-        assert!(
-            !nag.should_warn(false, t0),
-            "tarayıcı önde değilken uyarı yok"
-        );
-        assert!(
-            nag.should_warn(true, t0),
-            "tarayıcı öne gelince hemen uyarılır"
-        );
-        // Öğrenci uyarıyı kapatıp tarayıcıya döndü: hemen yeniden çıkmaz.
-        assert!(!nag.should_warn(true, t0 + Duration::from_secs(5)));
-        assert!(!nag.should_warn(false, t0 + WARN_INTERVAL));
-        assert!(nag.should_warn(true, t0 + WARN_INTERVAL));
+    fn kaplama_yalnizca_sayfa_alanini_orter() {
+        let pencere = Rect {
+            left: 100,
+            top: 50,
+            right: 1380,
+            bottom: 850,
+        };
+        // Sekme ve adres çubuğu açıkta kalır; ölçek büyüdükçe pay da büyür.
+        assert_eq!(page_area(pencere, 1.0), Some((100, 138, 1280, 712)));
+        assert_eq!(page_area(pencere, 1.5), Some((100, 182, 1280, 668)));
+        // Sayfa gösterilemeyecek kadar küçük pencere kaplanmaz.
+        let kucuk = Rect {
+            left: 0,
+            top: 0,
+            right: 300,
+            bottom: 150,
+        };
+        assert_eq!(page_area(kucuk, 1.0), None);
     }
 }
 
