@@ -133,16 +133,7 @@ pub async fn run(state: Arc<AppState>, cancel: CancellationToken) {
             continue;
         };
 
-        stop_sharing(&state);
-        // Bağlantı koptuğunda kontrol, kilit ve gezgin kendiliğinden kapanır.
-        // Multicast alıcısı okuma döngüsünün muhafızıyla durur.
-        state.stop_remote_control();
-        state.unlock_screen();
-        state.stop_browsing();
-        // Tuş izlemesi oturuma bağlıdır: bağlantı kopunca kendiliğinden kapanır.
-        crate::keymon::stop();
-        // USB kısıtlaması da öyle: öğretmen yokken bilgisayar kısıtlı kalmaz.
-        release_restrictions(&state).await;
+        end_session(&state).await;
 
         if cancel.is_cancelled() {
             return;
@@ -180,6 +171,25 @@ pub async fn run(state: Arc<AppState>, cancel: CancellationToken) {
     }
 }
 
+/// Biten bir bağlantının ardından bilgisayarı güvenli duruma döndürür.
+///
+/// Bağlantı nasıl kurulmuş olursa olsun (eşleştirme koduyla ya da kapsama
+/// girdiği için kendiliğinden) aynı temizlik çalışır: öğretmen yokken
+/// bilgisayar kilitli, izlenir ya da kısıtlı kalmaz.
+async fn end_session(state: &Arc<AppState>) {
+    stop_sharing(state);
+    // Kontrol, kilit ve gezgin kendiliğinden kapanır. Multicast alıcısı
+    // okuma döngüsünün muhafızıyla durur.
+    state.stop_remote_control();
+    state.unlock_screen();
+    state.stop_browsing();
+    // Tuş izlemesi oturuma bağlıdır: bağlantı kopunca kendiliğinden kapanır.
+    crate::keymon::stop();
+    // USB kısıtlaması ve internet engeli de öyle: öğretmen yokken bilgisayar
+    // kısıtlı kalmaz.
+    release_restrictions(state).await;
+}
+
 async fn wait_for_wake(state: &Arc<AppState>, cancel: &CancellationToken) {
     tokio::select! {
         _ = cancel.cancelled() => {}
@@ -200,35 +210,60 @@ async fn wait_for_wake_or_scan(state: &Arc<AppState>, cancel: &CancellationToken
     }
 }
 
+/// Bir konsolun "hâlâ açık" sayılması için son duyurusunun üzerinden
+/// geçebilecek azami süre. Konsol 3 saniyede bir duyuru yapar.
+const TEACHER_FRESH_SECS: i64 = 15;
+
 /// Keşif listesinden, bu cihazı kapsayan öğretmene bağlantı hedefi üretir.
 ///
 /// Eşleştirilmemişken otomatik müracaat için kullanılır; parmak izi keşiften
 /// alındığı için `connect_once`'in mevcut fingerprint handling'i aynen işler.
-///
-/// Yalnızca kapsamı (oda adı / bilgisayar adı ön eki) bu cihaza uyan
-/// konsollara başvurulur: `LAB201`, `LAB1`'i yöneten konsola gitmez ve kendi
-/// öğretmeni açılana kadar bekler. Birden çok konsol uyuyorsa en dar kapsamlı
-/// olan, eşitlikte en erken görünen seçilir.
 fn discovered_target(state: &AppState) -> Option<ConnectTarget> {
     let room = state.config.read().room.clone();
     let teachers = state.teachers.read();
-    let (_, seen) = teachers
-        .values()
-        .filter_map(|t| {
-            let score = openclass_protocol::discovery::scope_match(
-                t.room.as_deref(),
-                t.prefix.as_deref(),
-                &state.hostname,
-                room.as_deref(),
-            )?;
-            Some((score, t))
-        })
-        .min_by_key(|(score, t)| (std::cmp::Reverse(*score), t.last_seen))?;
+    let seen = pick_teacher(
+        teachers.values(),
+        &state.hostname,
+        room.as_deref(),
+        unix_now(),
+    )?;
     Some(ConnectTarget {
         host: seen.host.clone(),
         port: seen.control_port,
         fingerprint: seen.fingerprint.clone(),
     })
+}
+
+/// Başvurulacak konsolu seçer.
+///
+/// Yalnızca kapsamı (oda adı / bilgisayar adı ön eki) bu cihaza uyan
+/// konsollara başvurulur: `LAB201`, `LAB1`'i yöneten konsola gitmez ve kendi
+/// öğretmeni açılana kadar bekler. Birden çok konsol uyuyorsa en dar kapsamlı
+/// olan, eşitlikte **en son duyuru yapan** seçilir.
+///
+/// Duyurusu kesilmiş konsollar hiç seçilmez. Keşif listesi kapanan konsolları
+/// silmez; eskiden eşitlikte en erken görülen seçildiği için kapanmış bir
+/// konsol açık olanın önüne geçiyor ve öğrenci ona bağlanmaya çalışıp
+/// duruyordu — öğretmen cihazı "ağda görünüyor, bağlı değil" görüyordu.
+fn pick_teacher<'a>(
+    teachers: impl Iterator<Item = &'a crate::state::DiscoveredTeacher>,
+    hostname: &str,
+    room: Option<&str>,
+    now: i64,
+) -> Option<&'a crate::state::DiscoveredTeacher> {
+    teachers
+        .filter(|t| now - t.last_seen <= TEACHER_FRESH_SECS)
+        .filter_map(|t| {
+            let score = openclass_protocol::discovery::scope_match(
+                t.room.as_deref(),
+                t.prefix.as_deref(),
+                hostname,
+                room,
+            )?;
+            Some((score, t))
+        })
+        .max_by_key(|(score, t)| (*score, t.last_seen))
+        .map(|(_, t)| t)
 }
 
 /// Eşleştirilmemişken keşifteki öğretmene tek bir otomatik müracaat dener ve
@@ -248,6 +283,12 @@ async fn auto_probe(state: &Arc<AppState>, target: ConnectTarget, cancel: Cancel
         cancel.clone(),
     )
     .await;
+    // Yalnızca oturum gerçekten kurulduysa temizlenir: yetki bekleyen bir
+    // cihaz birkaç saniyede bir başvurur ve her seferinde disk okumak
+    // zayıf makinede boşa yüktür.
+    if matches!(*state.status.read(), ConnectionStatus::Connected { .. }) {
+        end_session(state).await;
+    }
     if matches!(&outcome, Err(err) if is_awaiting_approval(err)) {
         tracing::debug!("öğretmen henüz yetkilendirmemiş, otomatik müracaat sürüyor");
     } else if let Err(err) = &outcome {
@@ -258,22 +299,25 @@ async fn auto_probe(state: &Arc<AppState>, target: ConnectTarget, cancel: Cancel
     wait_for_wake_or_scan(state, &cancel).await;
 }
 
-/// Bu ajanın uyguladığı USB kısıtlamasını kaldırır ve kaldırdıysa
-/// öğrenciye bildirir.
+/// Bu ajanın uyguladığı USB kısıtlamasını ve internet engelini kaldırır;
+/// kaldırdıysa öğrenciye bildirir.
 async fn release_restrictions(state: &Arc<AppState>) {
-    let released = tokio::task::spawn_blocking(|| {
-        openclass_common::paths::data_dir(openclass_common::paths::App::Student)
+    let (usb, internet) = tokio::task::spawn_blocking(|| {
+        let usb = openclass_common::paths::data_dir(openclass_common::paths::App::Student)
             .map(|dir| crate::devblock::release_all(&dir))
-            .unwrap_or(false)
+            .unwrap_or(false);
+        (usb, crate::netblock::release_on_disconnect())
     })
     .await
-    .unwrap_or(false);
-    if released {
-        tracing::info!("bağlantı kapandı, USB kısıtlaması kaldırıldı");
-        state.show_notice(
-            "Öğretmen bağlantısı kapandı.\nUSB bellek kısıtlaması kaldırıldı.".to_string(),
-        );
-    }
+    .unwrap_or((false, false));
+    let what = match (usb, internet) {
+        (true, true) => "USB bellek kısıtlaması ve internet engeli kaldırıldı.",
+        (true, false) => "USB bellek kısıtlaması kaldırıldı.",
+        (false, true) => "İnternet engeli kaldırıldı.",
+        (false, false) => return,
+    };
+    tracing::info!(usb, internet, "bağlantı kapandı, kısıtlamalar kaldırıldı");
+    state.show_notice(format!("Öğretmen bağlantısı kapandı.\n{what}"));
 }
 
 fn to_fingerprint(bytes: &[u8]) -> Option<[u8; 32]> {
@@ -368,6 +412,14 @@ async fn connect_once(
     .map_err(|_| anyhow!("kimlik doğrulama zaman aşımına uğradı"))??;
 
     state.set_status(ConnectionStatus::Connected { teacher_name });
+    // Bu bilgisayar bir konsola bağlanabildi; kurulum tamam sayılır ve
+    // yapılandırma penceresi sonraki açılışlarda kendiliğinden açılmaz.
+    if !state.config.read().ever_connected {
+        state.config.write().ever_connected = true;
+        if let Err(err) = state.save_config() {
+            tracing::warn!(error = %format!("{err:#}"), "yapılandırma kaydedilemedi");
+        }
+    }
 
     // Yazma görevi.
     let (tx, mut rx) = mpsc::channel::<ClientMessage>(SEND_QUEUE);
@@ -389,6 +441,28 @@ async fn connect_once(
 
     // Arayüz komutlarının (yardım talebi gibi) bu bağlantıyı kullanabilmesi için.
     *state.outbox.write() = Some(tx.clone());
+
+    // Önceki çalışmalardan kalan çökme kayıtları öğretmen konsoluna iletilir;
+    // konsol bunları saklar ve öğretmene sorar. Kayıtlar, konsol aldığını
+    // bildirince silinir (bkz. `CrashReportsAck`).
+    let pending = tokio::task::spawn_blocking(|| {
+        openclass_common::crash::pending(openclass_common::paths::App::Student)
+    })
+    .await
+    .unwrap_or_default();
+    if !pending.is_empty() {
+        let reports = pending
+            .into_iter()
+            .map(|(_, r)| openclass_protocol::CrashRecord {
+                version: r.version,
+                os: r.os,
+                message: r.message,
+                location: r.location,
+                at: r.at,
+            })
+            .collect();
+        let _ = tx.send(ClientMessage::CrashReports { reports }).await;
+    }
 
     let result = session_loop(state, &mut source, &tx, teacher_ip, cancel).await;
 
@@ -478,6 +552,10 @@ async fn handshake(
 
     match status {
         DeviceStatus::Rejected => {
+            // Konsol ardından nedenini ve "eşleştirmeni bırak" işaretini
+            // gönderir. Bu mesaj okunmazsa kayıtlı eşleştirme silinmez ve
+            // ajan geçersiz kimliğiyle sonsuza kadar yeniden dener.
+            expect_auth_ok(state, source).await?;
             bail!("Bu cihazın yetkisi öğretmen tarafından kaldırılmış.")
         }
 
@@ -679,6 +757,22 @@ async fn handle_server_message(
     frame_timer: &mut tokio::time::Interval,
 ) -> Result<()> {
     match msg {
+        // Yayın zaten sürüyorsa yakalama yeniden kurulmaz, yalnızca kalite
+        // güncellenir. Konsol "Ekranları Göster"e her basıldığında bu mesajı
+        // gönderir; ikinci bir yakalama başlatmak DXGI yolunda "Parametre
+        // hatalı" hatasına, WGC yolunda saniyelerce beklemeye yol açar.
+        ServerMessage::StartScreenStream { stream_id, quality } if ctx.stream.is_some() => {
+            if let Some(s) = ctx.stream.as_mut() {
+                s.stream_id = stream_id;
+                s.quality = quality;
+                s.encoder.invalidate();
+                *frame_timer = fps_timer(quality.fps);
+                let mut sharing = state.sharing.read().clone();
+                sharing.fps = Some(quality.fps);
+                state.set_sharing(sharing);
+            }
+        }
+
         ServerMessage::StartScreenStream { stream_id, quality } => {
             match ScreenStream::start(stream_id, quality, &state.hostname) {
                 Ok(s) => {
@@ -759,7 +853,7 @@ async fn handle_server_message(
                     // Öğrenciye her zaman haber verilir; sessiz bırakma yok.
                     let yer = match subpath.as_deref() {
                         Some(alt) => format!("{}\\{}", destination.label(), alt),
-                        None => format!("{}\\OpenClass", destination.label()),
+                        None => destination.label().to_string(),
                     };
                     state.show_notice(format!(
                         "Öğretmeniniz size bir dosya gönderiyor: {} ({:.1} MB) — {yer}",
@@ -1024,6 +1118,13 @@ async fn handle_server_message(
             match crate::collect::find(destination, &pattern) {
                 Ok(files) if files.is_empty() => {
                     tracing::info!(desen = %pattern, ?destination, "toplama isteği eşleşme bulamadı");
+                    let _ = tx
+                        .send(ClientMessage::CollectDone {
+                            matched: 0,
+                            sent: 0,
+                            errors: Vec::new(),
+                        })
+                        .await;
                     state.show_notice(format!(
                         "Öğretmeniniz dosya toplamak istedi ama \"{}\" deseni {} klasöründe hiçbir dosyayla eşleşmedi.",
                         pattern,
@@ -1096,6 +1197,11 @@ async fn handle_server_message(
                             }
                         }
                         st.show_notice(mesaj);
+                        let _ = sender.blocking_send(ClientMessage::CollectDone {
+                            matched: adet as u32,
+                            sent: tamam as u32,
+                            errors: hatalar,
+                        });
                     });
                 }
                 Err(err) => {
@@ -1108,6 +1214,13 @@ async fn handle_server_message(
                         "Dosya toplama isteği reddedildi: \"{}\"\n{}",
                         pattern, err
                     ));
+                    let _ = tx
+                        .send(ClientMessage::CollectDone {
+                            matched: 0,
+                            sent: 0,
+                            errors: vec![err.to_string()],
+                        })
+                        .await;
                 }
             }
         }
@@ -1359,6 +1472,17 @@ async fn handle_server_message(
         ServerMessage::HelpAcknowledged => {
             *state.help_requested.write() = false;
             state.emit("help-acknowledged", ());
+        }
+
+        ServerMessage::CrashReportsAck => {
+            // Konsol kayıtları sakladı; buradaki kopyalar silinir.
+            tokio::task::spawn_blocking(|| {
+                for (path, _) in
+                    openclass_common::crash::pending(openclass_common::paths::App::Student)
+                {
+                    let _ = std::fs::remove_file(path);
+                }
+            });
         }
 
         ServerMessage::Ping { token } => {
@@ -1794,5 +1918,70 @@ fn forget_pairing(state: &Arc<AppState>) {
     tracing::warn!("öğretmen yetkiyi kaldırdı, kayıtlı eşleştirme siliniyor");
     if let Err(err) = state.clear_pairing() {
         tracing::error!(error = %format!("{err:#}"), "eşleştirme silinemedi");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::DiscoveredTeacher;
+
+    fn teacher(host: &str, prefix: Option<&str>, last_seen: i64) -> DiscoveredTeacher {
+        DiscoveredTeacher {
+            teacher_id: uuid::Uuid::new_v4(),
+            teacher_name: "Öğretmen".into(),
+            host: host.into(),
+            control_port: 7643,
+            fingerprint_hex: String::new(),
+            fingerprint: vec![0; 32],
+            last_seen,
+            room: None,
+            prefix: prefix.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn kapanmis_konsol_acik_olanin_onune_gecmez() {
+        // Aynı sınıfı yöneten iki konsol görülmüş; ilki çoktan kapanmış.
+        let list = [
+            teacher("10.0.0.1", Some("BLAB1"), 1_000),
+            teacher("10.0.0.2", Some("BLAB1"), 5_000),
+        ];
+        let picked = pick_teacher(list.iter(), "BLAB1_04", None, 5_002).unwrap();
+        assert_eq!(picked.host, "10.0.0.2");
+    }
+
+    #[test]
+    fn duyurusu_kesilen_konsola_basvurulmaz() {
+        let list = [teacher("10.0.0.1", Some("BLAB1"), 1_000)];
+        assert!(pick_teacher(
+            list.iter(),
+            "BLAB1_04",
+            None,
+            1_000 + TEACHER_FRESH_SECS + 1
+        )
+        .is_none());
+        assert!(pick_teacher(list.iter(), "BLAB1_04", None, 1_000 + TEACHER_FRESH_SECS).is_some());
+    }
+
+    #[test]
+    fn dar_kapsamli_konsol_secilir_ve_uymayan_atlanir() {
+        let list = [
+            teacher("10.0.0.1", None, 5_000),
+            teacher("10.0.0.2", Some("BLAB1"), 4_999),
+            teacher("10.0.0.3", Some("BLAB2"), 5_000),
+        ];
+        assert_eq!(
+            pick_teacher(list.iter(), "BLAB1_04", None, 5_000)
+                .unwrap()
+                .host,
+            "10.0.0.2"
+        );
+        assert_eq!(
+            pick_teacher(list.iter(), "PC-07", None, 5_000)
+                .unwrap()
+                .host,
+            "10.0.0.1"
+        );
     }
 }

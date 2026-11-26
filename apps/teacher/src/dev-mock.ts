@@ -8,7 +8,13 @@
  * Üretim derlemesine **dahil edilmez**: `main.tsx` bu modülü yalnızca
  * `import.meta.env.DEV` iken ve Tauri köprüsü yokken yükler.
  */
-import type { AuditEntry, DeviceView, ServerInfo } from "./types";
+import type {
+  AuditEntry,
+  CollectionView,
+  CollectTarget,
+  DeviceView,
+  ServerInfo,
+} from "./types";
 
 const HOSTS = [
   "LAB101", "LAB102", "LAB103", "LAB104", "LAB105", "LAB106",
@@ -51,6 +57,8 @@ let groups = [
 ];
 
 const serverInfo: ServerInfo = {
+  // `?surum=0.5.0` ile eski bir sürüm taklit edilir; güncelleme penceresi açılır.
+  appVersion: new URLSearchParams(location.search).get("surum") ?? "0.6.0",
   teacherId: "22222222-2222-4222-8222-222222222222",
   teacherName: "Cihan Güngör",
   className: "Lab 1 — 11-A Bilişim",
@@ -145,10 +153,20 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   },
   get_browse: () => mockBrowseView(),
   open_downloads_dir: () => null,
-  // Klasör seçimi için kısayol: native diyalog iptal edilmiş gibi davranır.
-  "plugin:dialog|open": () => null,
-  send_file: () => "00000000-0000-0000-0000-000000000000",
-  collect_files: () => 1,
+  // Native diyalog yok: çoklu dosya seçiminde örnek dosyalar döner, diğer
+  // her şeyde (klasör seçimi) iptal edilmiş gibi davranır.
+  "plugin:dialog|open": (args) =>
+    (args.options as { multiple?: boolean } | undefined)?.multiple
+      ? [
+          "C:\\Users\\Hoca\\Belgeler\\sınav.zip",
+          "C:\\Users\\Hoca\\Belgeler\\Yönerge.pdf",
+          "C:\\Users\\Hoca\\Belgeler\\şablon.docx",
+        ]
+      : null,
+  send_files: (args) => (args.paths as string[]).length,
+  collect_files: (args) => (args.deviceIds as string[]).length,
+  get_collection: () => mockCollection(),
+  open_release_page: () => null,
   shutdown_device: () => null,
   get_download_root: () => "C:\\Users\\Hoca\\Belgeler\\OpenClass\\Toplanan",
   set_download_root: (args: Record<string, unknown>) =>
@@ -315,6 +333,33 @@ function stopKeymock() {
 }
 
 /** Tauri köprüsünün yerine geçen en küçük sahte uygulama. */
+/** Sonuç tablosunun her durumunu gösteren örnek toplama. */
+function mockCollection(): CollectionView {
+  const states: Pick<CollectTarget, "state" | "files" | "matched" | "errors">[] = [
+    { state: "done", files: 1, matched: 1, errors: [] },
+    { state: "done", files: 3, matched: 3, errors: [] },
+    { state: "done", files: 0, matched: 0, errors: [] },
+    { state: "receiving", files: 1, matched: null, errors: [] },
+    { state: "no_reply", files: 0, matched: null, errors: [] },
+    { state: "done", files: 1, matched: 2, errors: ["ödev.docx: dosya başka bir program tarafından kullanılıyor"] },
+    { state: "offline", files: 0, matched: null, errors: [] },
+    { state: "waiting", files: 0, matched: null, errors: [] },
+  ];
+  return {
+    id: "mock",
+    pattern: "sınav.zip",
+    root: "Masaüstü",
+    dir: "C:\\Users\\Hoca\\Belgeler\\OpenClass\\Toplanan",
+    deleteSource: false,
+    startedAt: Math.floor(Date.now() / 1000),
+    targets: states.map((st, i) => ({
+      deviceId: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+      hostname: HOSTS[i] ?? `LAB${i}`,
+      ...st,
+    })),
+  };
+}
+
 export function installDevMock() {
   const w = window as unknown as Record<string, unknown>;
   // `listen()` dönüşündeki unlisten işlevi bu nesneyi kullanır.
@@ -330,6 +375,31 @@ export function installDevMock() {
     // Olay köprüsü: sahte arka uç olay yaymaz, dinleyiciler boşa çalışır.
     transformCallback: (cb: unknown) => cb,
   };
+  // `?tikla=Dosya Gönder,Dosya seçmek` gibi bir adres, verilen yazıları
+  // taşıyan düğmelere sırayla tıklar; pencerelerin ekran görüntüsünü elle
+  // gezmeden almak içindir.
+  // `bekle=<adres>` yavaş yanıt veren bir adresi resim olarak yükletir;
+  // başsız tarayıcı sayfa "yüklendi" demeden önce tıklamalar tamamlanır.
+  const params = new URLSearchParams(location.search);
+  const wait = params.get("bekle");
+  if (wait) {
+    const img = new Image();
+    img.src = wait;
+    img.style.display = "none";
+    document.body.appendChild(img);
+  }
+  const clicks = params.get("tikla")?.split(",") ?? [];
+  clicks.forEach((text, i) => {
+    window.setTimeout(() => {
+      const all = [...document.querySelectorAll("button")];
+      const want = text.trim();
+      // Önce yazısı birebir aynı olan: "Başlat", "Yeniden Başlat"a gitmesin.
+      const hit =
+        all.find((b) => b.textContent?.trim() === want) ??
+        all.find((b) => b.textContent?.includes(want));
+      hit?.click();
+    }, 1500 + i * 500);
+  });
   // eslint-disable-next-line no-console
   console.info("[OpenClass] Sahte geliştirme arka ucu etkin — Tauri köprüsü yok.");
 }

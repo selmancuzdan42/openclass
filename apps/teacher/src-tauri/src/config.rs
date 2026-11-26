@@ -100,6 +100,30 @@ pub fn suggest_prefix_from_hostname(hostname: &str) -> Option<String> {
 }
 
 impl TeacherConfig {
+    /// İlk açılışta sınıfı öğretmen bilgisayarının adından kendiliğinden seçer.
+    ///
+    /// Okullarda yaygın düzen: öğretmen `BLAB1-OGR`, öğrenciler `BLAB101`,
+    /// `BLAB102`… Ad böyle bir ek taşıyorsa ön ek (`BLAB1`) sınıf olarak
+    /// kaydedilir. Açılıştaki sınıf sorusu **kapatılmaz**: pencere bu sınıf
+    /// seçili gelir, öğretmen onaylar ya da düzeltir; yanlış adlandırılmış
+    /// bir bilgisayar sessizce yanlış sınıfı yönetmez. Öğretmen daha önce
+    /// seçim yaptıysa ya da addan ön ek çıkmıyorsa hiçbir şey değişmez.
+    pub fn adopt_hostname_prefix(&mut self, hostname: &str) -> Option<String> {
+        if self.setup_completed || self.active_room.is_some() || self.active_prefix.is_some() {
+            return None;
+        }
+        let prefix = suggest_prefix_from_hostname(hostname)?;
+        self.active_prefix = Some(prefix.clone());
+        self.setup_completed = true;
+        if !self.groups.iter().any(|g| g.prefix == prefix) {
+            self.groups.push(DeviceGroup {
+                name: prefix.clone(),
+                prefix: prefix.clone(),
+            });
+        }
+        Some(prefix)
+    }
+
     /// Yapılandırmayı okur; dosya yoksa veya bozuksa varsayılanı üretip yazar.
     pub fn load_or_create(path: &Path) -> Result<Self> {
         match std::fs::read_to_string(path) {
@@ -134,7 +158,28 @@ impl TeacherConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::suggest_prefix_from_hostname;
+    use super::{suggest_prefix_from_hostname, TeacherConfig};
+
+    #[test]
+    fn ilk_acilista_sinif_bilgisayar_adindan_alinir() {
+        let mut cfg = TeacherConfig::default();
+        assert_eq!(
+            cfg.adopt_hostname_prefix("BLAB1-Ogr").as_deref(),
+            Some("BLAB1")
+        );
+        assert_eq!(cfg.active_prefix.as_deref(), Some("BLAB1"));
+        assert!(cfg.setup_completed && cfg.ask_at_startup);
+        assert_eq!(cfg.groups.len(), 1);
+
+        // Yapılmış seçimin üzerine yazılmaz.
+        assert_eq!(cfg.adopt_hostname_prefix("LAB2-OGR"), None);
+        assert_eq!(cfg.active_prefix.as_deref(), Some("BLAB1"));
+
+        // Addan ön ek çıkmıyorsa seçim öğretmene bırakılır.
+        let mut cfg = TeacherConfig::default();
+        assert_eq!(cfg.adopt_hostname_prefix("DESKTOP-4F9K2A"), None);
+        assert!(!cfg.setup_completed);
+    }
 
     #[test]
     fn ogretmen_ekinden_on_ek_onerilir() {

@@ -43,6 +43,7 @@ OpenClass'ın **savunmadığı** senaryolar:
 | Bellek tüketimi | Çerçeve boyutu sınırı (8 MiB), cihaz başına tek kare, dolu kuyrukta kare düşürme |
 | Veri sızıntısı | Ekran görüntüleri kendiliğinden diske yazılmaz (yalnızca öğretmenin açık "Ekran görüntüsü al" komutuyla, denetim kaydıyla); loglara anahtar/parola/kod yazılmaz |
 | Hata raporu | Çökme nedeni yalnızca öğretmenin onayıyla gönderilir (Google Forms); bilgisayar adı, kullanıcı adı, IP adresi ve cihaz kimliği maskelenir ya da hiç toplanmaz |
+| Güncelleme denetimi | Öğretmen konsolu açılışta GitHub'daki son sürüm bilgisini okur (`api.github.com`); bu istek dışında bir şey gönderilmez. Hiçbir şey kendiliğinden indirilmez ya da kurulmaz |
 | Gizli izleme | Tepsi simgesi her zaman görünür ve paylaşım sırasında değişir; simgeyi gizleyen bir seçenek yoktur |
 
 ## Bilinen sınırlamalar

@@ -12,7 +12,9 @@ import type {
   BroadcastInfo,
   DeviceGroup,
   DeviceView,
+  CollectionView,
   FileDestination,
+  UpdateInfo,
   BrowseView,
   InputEvent,
   TransferView,
@@ -98,18 +100,23 @@ export const api = {
   /** `null` varsayılan klasöre döner. Dönen değer yürürlükteki klasördür. */
   setDownloadRoot: (path: string | null) => call<string>("set_download_root", { path }),
 
-  sendFile: (
+  /** Dosyaları sırayla bütün hedeflere gönderir; kuyruğa alınan dosya sayısını döner. */
+  sendFiles: (
     deviceIds: string[],
-    path: string,
+    paths: string[],
     destination: FileDestination,
     subpath: string | null,
-  ) => call<string>("send_file", { deviceIds, path, destination, subpath }),
+  ) => call<number>("send_files", { deviceIds, paths, destination, subpath }),
   collectFiles: (
     deviceIds: string[],
     pattern: string,
     destination: FileDestination,
     deleteSource: boolean,
   ) => call<number>("collect_files", { deviceIds, pattern, destination, deleteSource }),
+  /** Son dosya toplama işleminin durumu. */
+  getCollection: () => call<CollectionView | null>("get_collection"),
+  /** Sürüm sayfasını tarayıcıda açar. */
+  openReleasePage: () => call<void>("open_release_page"),
   shutdownDevice: (deviceId: string) => call<void>("shutdown_device", { deviceId }),
   getTransfers: () => call<TransferView[]>("get_transfers"),
   clearFinishedTransfers: () => call<void>("clear_finished_transfers"),
@@ -213,4 +220,55 @@ export function formatDuration(sinceUnixSeconds: number): string {
   if (h > 0) return `${h} sa ${m} dk`;
   if (m > 0) return `${m} dk ${s} sn`;
   return `${s} sn`;
+}
+
+// ------------------------------------------------------------ güncelleme
+
+const LATEST_RELEASE = "https://api.github.com/repos/selmancuzdan42/openclass/releases/latest";
+
+/** `v0.5.3` → `[0, 5, 3]`; sayı olmayan parçalar sıfır sayılır. */
+function versionParts(text: string): number[] {
+  return text
+    .trim()
+    .replace(/^v/i, "")
+    .split(/[.+-]/)
+    .slice(0, 3)
+    .map((p) => Number.parseInt(p, 10) || 0);
+}
+
+/** `a`, `b`'den yeni mi? */
+export function isNewerVersion(a: string, b: string): boolean {
+  const [x, y] = [versionParts(a), versionParts(b)];
+  for (let i = 0; i < 3; i++) {
+    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0);
+  }
+  return false;
+}
+
+/**
+ * GitHub'da kurulu olandan yeni bir sürüm var mı?
+ *
+ * Yalnızca sürüm bilgisi okunur; hiçbir şey indirilmez ve kurulmaz. İnternet
+ * yoksa ya da yanıt beklenen biçimde değilse hata fırlatır.
+ */
+export async function checkForUpdate(current: string): Promise<UpdateInfo | null> {
+  const response = await fetch(LATEST_RELEASE, {
+    headers: { Accept: "application/vnd.github+json" },
+  });
+  if (!response.ok) throw new Error(`Sürüm bilgisi alınamadı (HTTP ${response.status}).`);
+  const data = (await response.json()) as { tag_name?: unknown; body?: unknown };
+  if (typeof data.tag_name !== "string") throw new Error("Sürüm bilgisi okunamadı.");
+  if (!isNewerVersion(data.tag_name, current)) return null;
+  return {
+    version: data.tag_name.replace(/^v/i, ""),
+    // Notlar Markdown yazılır; düz metin gösterildiği için işaretler ayıklanır.
+    notes:
+      typeof data.body === "string"
+        ? data.body
+            .slice(0, 4000)
+            .replace(/^#+\s*/gm, "")
+            .replace(/\*\*/g, "")
+            .trim()
+        : "",
+  };
 }

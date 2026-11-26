@@ -210,6 +210,11 @@ async fn handle_connection(
     });
 
     // Aynı cihazın eski oturumu varsa kapat (yeniden bağlanma senaryosu).
+    // Eski oturum kendi okuma döngüsünde `kick` ile hemen uyanır; temizliği
+    // yalnızca kendi kaydına dokunur (bkz. `Registry::detach_session`).
+    static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let session = NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let kick = CancellationToken::new();
     if let Some(previous) = state.registry.attach(ConnectedDevice {
         device_id,
         hostname: hostname.clone(),
@@ -217,9 +222,15 @@ async fn handle_connection(
         connected_at: crate::db::now(),
         app_version: authenticated.app_version.clone(),
         sender: tx.clone(),
+        session,
+        kick: kick.clone(),
     }) {
         tracing::info!(%device_id, "aynı cihazın önceki oturumu kapatılıyor");
-        drop(previous);
+        previous.kick.cancel();
+        // Öğrenci yeniden bağlanırken yayını ve kısıtlamaları sıfırdan
+        // başlatır; eski oturumdan kalan kare ve bayraklar geçersizdir.
+        state.registry.reset_session_state(device_id);
+        release_device_state(&state, device_id);
     }
 
     state
@@ -295,44 +306,28 @@ async fn handle_connection(
         state.request_broadcast_keyframe();
     }
 
-    let result = read_loop(&state, &mut source, &tx, device_id, &hostname, cancel).await;
+    let result = read_loop(
+        &state,
+        &mut source,
+        &tx,
+        device_id,
+        &hostname,
+        cancel,
+        &kick,
+    )
+    .await;
+
+    // Yerini aynı cihazın yeni oturumu aldıysa cihaza ait durum artık
+    // yenisinindir; bu oturum yalnızca kendi soketini kapatır.
+    if !state.registry.detach_session(device_id, session) {
+        drop(tx);
+        writer.abort();
+        tracing::info!(%device_id, %hostname, "eski oturum kapandı, yenisi sürüyor");
+        return result;
+    }
 
     // Temizlik: bağlantı nasıl biterse bitsin sistem güvenli duruma döner.
-    // Kontrol edilen cihaz düşerse kontrol de biter.
-    {
-        let mut controlled = state.controlled_device.write();
-        if *controlled == Some(device_id) {
-            *controlled = None;
-        }
-    }
-    state.broadcast_fallback.write().remove(&device_id);
-    // Ekranı sınıfa gösterilen cihaz düşerse yansıtma biter.
-    if state.broadcast_source() == Some(device_id) {
-        if let Some(handle) = state.broadcast.read().as_ref() {
-            handle.stop();
-        }
-    }
-    // Gezilen cihaz düşerse gezgin kapanır ve yarım indirme temizlenir.
-    {
-        let closed = {
-            let mut guard = state.browse.write();
-            match guard.as_ref() {
-                Some(s) if s.device_id == device_id => {
-                    if let Some(session) = guard.take() {
-                        if let Some(download) = session.download {
-                            download.abort();
-                        }
-                    }
-                    true
-                }
-                _ => false,
-            }
-        };
-        if closed {
-            state.emit("browse-changed", Option::<crate::browse::BrowseView>::None);
-        }
-    }
-    state.registry.detach(device_id);
+    release_device_state(&state, device_id);
     // Öğretmen bir bilgisayarın düştüğünü fark etsin. Konsolun kendisi
     // kapanırken bildirim gösterilmez.
     if !state.cancel.is_cancelled() {
@@ -349,6 +344,53 @@ async fn handle_connection(
     tracing::info!(%device_id, %hostname, "öğrenci bağlantısı kapandı");
 
     result
+}
+
+/// Bir cihazın bağlantısına bağlı konsol durumunu bırakır: uzaktan kontrol,
+/// ekranının sınıfa yansıtılması, dosya gezgini ve yayın yedeği.
+///
+/// Bağlantı koptuğunda ve aynı cihaz yeniden bağlandığında çağrılır; öğrenci
+/// her iki durumda da bunları kendi tarafında kapatmıştır.
+fn release_device_state(state: &Arc<AppState>, device_id: Uuid) {
+    // Kontrol edilen cihaz düşerse kontrol de biter.
+    let was_controlled = {
+        let mut controlled = state.controlled_device.write();
+        let hit = *controlled == Some(device_id);
+        if hit {
+            *controlled = None;
+        }
+        hit
+    };
+    if was_controlled {
+        state.emit("control-changed", Option::<String>::None);
+    }
+    state.broadcast_fallback.write().remove(&device_id);
+    // Süren dosya toplaması yarıda kalır.
+    crate::collect::dropped(state, device_id);
+    // Ekranı sınıfa gösterilen cihaz düşerse yansıtma biter.
+    if state.broadcast_source() == Some(device_id) {
+        if let Some(handle) = state.broadcast.read().as_ref() {
+            handle.stop();
+        }
+    }
+    // Gezilen cihaz düşerse gezgin kapanır ve yarım indirme temizlenir.
+    let closed = {
+        let mut guard = state.browse.write();
+        match guard.as_ref() {
+            Some(s) if s.device_id == device_id => {
+                if let Some(session) = guard.take() {
+                    if let Some(download) = session.download {
+                        download.abort();
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
+    };
+    if closed {
+        state.emit("browse-changed", Option::<crate::browse::BrowseView>::None);
+    }
 }
 
 /// Yetkilendirilmiş bağlantının bilgisi.
@@ -520,11 +562,15 @@ async fn authenticate(
                 },
             )
             .await?;
-            state.db.audit(
-                AuditKind::AuthFailed,
-                Some(device_id),
-                Some("yetkisi kaldırılmış cihaz"),
-            );
+            // Yetkisi kaldırılmış cihaz birkaç saniyede bir yeniden dener;
+            // denetim kaydına yalnızca ilk başvurusu yazılır.
+            if state.registry.first_rejection(device_id) {
+                state.db.audit(
+                    AuditKind::AuthFailed,
+                    Some(device_id),
+                    Some("yetkisi kaldırılmış cihaz"),
+                );
+            }
             bail!("yetkisi kaldırılmış cihaz bağlanmaya çalıştı");
         }
 
@@ -732,6 +778,7 @@ async fn read_loop(
     device_id: Uuid,
     hostname: &str,
     cancel: CancellationToken,
+    kick: &CancellationToken,
 ) -> Result<()> {
     let mut ping_timer = tokio::time::interval(PING_INTERVAL);
     ping_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -747,6 +794,9 @@ async fn read_loop(
                 let _ = tx.send(ServerMessage::StopScreenStream { stream_id: 0 }).await;
                 return Ok(());
             }
+
+            // Aynı cihaz yeniden bağlandı; bu oturum artık geçersiz.
+            _ = kick.cancelled() => return Ok(()),
 
             _ = ping_timer.tick() => {
                 ping_token = ping_token.wrapping_add(1);
@@ -1011,81 +1061,79 @@ async fn handle_client_message(
             size,
             sha256,
         } => {
-            // Toplu toplama ("Topla") gezgin oturumu açmaz: öğrenci
-            // `BrowseFileStart`'ı doğrudan gönderir. Bu durumda `state.browse`
-            // boştur ve indirme, genel indirme köküne (download_root) yazılır.
-            // Gezgin akışındaysa (Dosya Al) oturumun hostname + hedefi kullanılır.
-            let (hostname, target_dir) = {
-                let guard = state.browse.read();
-                match guard.as_ref() {
-                    Some(s) if s.device_id == device_id => {
-                        (s.hostname.clone(), s.target_dir.clone())
+            // Aynı mesajlarla iki ayrı iş akar: gezginden istenen tek dosya
+            // ("Dosya Al") ve toplu toplama ("Topla"). Gelen dosya, öğretmenin
+            // gezginde istediği indirmenin kimliğini taşıyorsa gezgine,
+            // taşımıyorsa toplamaya aittir. Yalnızca "gezgin açık mı" diye
+            // bakmak, gezgin başka bir öğrencide açıkken toplanan dosyaların
+            // kaybolmasına yol açıyordu.
+            let fetch = {
+                let mut guard = state.browse.write();
+                match guard.as_mut() {
+                    Some(s) if s.device_id == device_id && s.pending_fetch == Some(request_id) => {
+                        s.pending_fetch = None;
+                        Some(s.target_dir.clone())
                     }
-                    _ => {
-                        // Topla: gezgin oturumu yok. Hostname'i cihaz
-                        // kaydından çöz, hedef yok → genel indirme kökü.
-                        drop(guard);
-                        let hostname = state
-                            .registry
-                            .build_views(&state.db)
-                            .ok()
-                            .and_then(|v| {
-                                v.into_iter()
-                                    .find(|d| d.device_id == device_id)
-                                    .map(|d| d.hostname)
-                            })
-                            .unwrap_or_else(|| device_id.to_string());
-                        (hostname, None)
-                    }
+                    _ => None,
                 }
             };
+            let is_fetch = fetch.is_some();
 
             // Öğretmen indirme için ayrı bir hedef klasör seçtiyse oraya,
             // seçmediyse genel indirme köküne yazılır.
-            let kok = target_dir.or_else(|| state.download_root.read().clone());
-            match crate::browse::Download::open(
+            let kok = fetch
+                .flatten()
+                .or_else(|| state.download_root.read().clone());
+            let opened = crate::browse::Download::open(
                 request_id,
-                &hostname,
+                hostname,
                 &name,
                 size,
                 sha256,
                 kok.as_deref(),
-            ) {
-                Ok(download) => {
-                    // Gezgin oturumu açıksa indirme oturumda izlenir (Dosya Al);
-                    // açık değilse toplu toplamadır (Topla) → aktif indirme
-                    // tablosunda izlenir. İkisi aynı akışı (BrowseChunk/End)
-                    // ayrı yerlerden besler.
+            );
+
+            match (opened, is_fetch) {
+                (Ok(download), true) => {
                     let mut guard = state.browse.write();
-                    if let Some(session) = guard.as_mut() {
-                        tracing::info!(%device_id, %request_id, %name, size, "indirme başladı");
-                        session.download_view = Some(crate::browse::DownloadView {
-                            name: download.name.clone(),
-                            size,
-                            received: 0,
-                            finished: false,
-                            ok: false,
-                            detail: String::new(),
-                        });
-                        session.download = Some(download);
-                        let view = crate::browse::BrowseView::from(&*session);
+                    let Some(session) = guard.as_mut().filter(|s| s.device_id == device_id) else {
+                        // Gezgin bu arada kapandı; dosya beklenmiyor.
                         drop(guard);
-                        state.emit("browse-changed", Some(view));
-                    } else {
-                        drop(guard);
-                        state.active_downloads.write().insert(request_id, download);
-                        tracing::info!(%device_id, %request_id, %name, size, "toplu toplama indirmesi başladı");
-                    }
+                        download.abort();
+                        return;
+                    };
+                    tracing::info!(%device_id, %request_id, %name, size, "indirme başladı");
+                    session.download_view = Some(crate::browse::DownloadView {
+                        name: download.name.clone(),
+                        size,
+                        received: 0,
+                        finished: false,
+                        ok: false,
+                        detail: String::new(),
+                    });
+                    session.download = Some(download);
+                    let view = crate::browse::BrowseView::from(&*session);
+                    drop(guard);
+                    state.emit("browse-changed", Some(view));
                 }
-                Err(err) => {
+                (Ok(download), false) => {
+                    state.active_downloads.write().insert(request_id, download);
+                    crate::collect::receiving(state, device_id);
+                    tracing::info!(%device_id, %request_id, %name, size, "toplu toplama indirmesi başladı");
+                }
+                (Err(err), true) => {
                     tracing::error!(%err, "indirme hazırlanamadı");
                     let mut guard = state.browse.write();
-                    if let Some(session) = guard.as_mut() {
+                    if let Some(session) = guard.as_mut().filter(|s| s.device_id == device_id) {
                         session.error = Some(err.to_string());
                         let view = crate::browse::BrowseView::from(&*session);
                         drop(guard);
                         state.emit("browse-changed", Some(view));
                     }
+                }
+                (Err(err), false) => {
+                    tracing::error!(%device_id, %err, "toplanan dosya hazırlanamadı");
+                    crate::collect::file_failed(state, device_id, format!("{name}: {err}"));
                 }
             }
         }
@@ -1139,7 +1187,12 @@ async fn handle_client_message(
             };
             if let Err(err) = download.write_chunk(seq, &data) {
                 tracing::error!(%err, "toplu toplama parçası yazılamadı");
-                downloads.remove(&request_id);
+                let name = download.name.clone();
+                if let Some(broken) = downloads.remove(&request_id) {
+                    broken.abort();
+                }
+                drop(downloads);
+                crate::collect::file_failed(state, device_id, format!("{name}: {err}"));
             }
         }
 
@@ -1193,6 +1246,7 @@ async fn handle_client_message(
             let Some(download) = downloads.remove(&request_id) else {
                 return;
             };
+            drop(downloads);
             let name = download.name.clone();
             match download.finish() {
                 Ok(path) => {
@@ -1200,10 +1254,48 @@ async fn handle_client_message(
                     state
                         .db
                         .audit(AuditKind::FileDownloaded, Some(device_id), Some(&name));
+                    crate::collect::file_saved(state, device_id);
                 }
                 Err(err) => {
                     tracing::error!(%device_id, %err, "toplu toplama dosyası doğrulanamadı");
+                    crate::collect::file_failed(state, device_id, format!("{name}: {err}"));
                 }
+            }
+        }
+
+        ClientMessage::CollectDone {
+            matched,
+            sent,
+            errors,
+        } => {
+            tracing::info!(%device_id, %hostname, matched, sent, hata = errors.len(), "dosya toplama bitti");
+            crate::collect::done(state, device_id, matched, errors);
+        }
+
+        ClientMessage::CrashReports { reports } => {
+            // Kayıt yalnızca saklanır; öğretmen onay vermeden hiçbir yere
+            // gönderilmez. Hangi bilgisayardan geldiği kayda yazılmaz.
+            let mut stored = 0usize;
+            for r in reports.into_iter().take(20) {
+                match openclass_common::crash::store_received(
+                    openclass_common::paths::App::Teacher,
+                    "student",
+                    &r.version,
+                    &r.os,
+                    &r.message,
+                    &r.location,
+                    r.at,
+                ) {
+                    Ok(()) => stored += 1,
+                    Err(err) => tracing::warn!(%err, "öğrenci çökme kaydı saklanamadı"),
+                }
+            }
+            tracing::info!(%device_id, adet = stored, "öğrenci çökme kayıtları alındı");
+            if let Some(tx) = state.registry.sender(device_id) {
+                let _ = tx.send(ServerMessage::CrashReportsAck).await;
+            }
+            if stored > 0 {
+                state.emit("crash-reports-changed", ());
             }
         }
 

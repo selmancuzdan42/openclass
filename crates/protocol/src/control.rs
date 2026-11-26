@@ -145,6 +145,19 @@ pub struct BrowseRoot {
     pub path: String,
 }
 
+/// Bir çökmenin kimlik taşımayan kaydı (bkz. `ClientMessage::CrashReports`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CrashRecord {
+    pub version: String,
+    /// İşletim sistemi ve mimari (`windows x86_64`).
+    pub os: String,
+    pub message: String,
+    /// Hatanın koddaki yeri (`dosya:satır`).
+    pub location: String,
+    /// Çökme anı (Unix saniye).
+    pub at: u64,
+}
+
 /// Fare düğmesi.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -360,6 +373,29 @@ pub enum ClientMessage {
     /// Öğretmen ekranı yayınında eksik parça kaldı; tam kare isteniyor.
     RequestTeacherKeyframe,
 
+    /// Bir `CollectRequest`'in sonucu.
+    ///
+    /// Dosyalar `BrowseFile*` akışıyla gittikten sonra gönderilir; öğretmen
+    /// kimin kaç dosya teslim ettiğini, kimde dosya bulunmadığını buradan
+    /// öğrenir. 0.5.2 ve öncesi ajanlar bunu göndermez.
+    CollectDone {
+        /// Desene uyan dosya sayısı.
+        matched: u32,
+        /// Gönderimi tamamlanan dosya sayısı.
+        sent: u32,
+        /// Gönderilemeyen dosyaların ya da isteğin reddedilme nedeni.
+        errors: Vec<String>,
+    },
+
+    /// Öğrenci ajanının önceki çalışmalardan kalan çökme kayıtları.
+    ///
+    /// Yalnızca çökmenin nedenini taşır; bilgisayar adı, kullanıcı adı ve
+    /// kimlik içermez. Öğretmen konsolu bunları saklar ve öğretmene sorar;
+    /// onay vermeden hiçbir yere gönderilmez.
+    CrashReports {
+        reports: Vec<CrashRecord>,
+    },
+
     /// Multicast paketleri bu öğrenciye ulaşmıyor.
     ///
     /// Öğretmen bu cihaza kareleri TLS üzerinden tek tek göndermeye geçer.
@@ -524,6 +560,10 @@ pub enum ServerMessage {
     /// Geri dönüş yoktur; öğrenciye karşı şeffaf olmak için kapatmadan önce
     /// ekranda kısa bir bildirim gösterilir.
     ShutdownDevice,
+
+    /// `ClientMessage::CrashReports` alındı ve saklandı; öğrenci kendi
+    /// kopyalarını silebilir.
+    CrashReportsAck,
 
     /// Öğrencinin belirtilen kök klasöründen dosya(ları) toplar.
     ///

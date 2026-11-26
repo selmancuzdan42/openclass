@@ -48,6 +48,11 @@ pub struct ConnectedDevice {
     pub app_version: String,
     /// Cihaza mesaj göndermek için kanal. Dolu kanal = yavaş istemci.
     pub sender: mpsc::Sender<ServerMessage>,
+    /// Bu bağlantının numarası. Aynı cihaz yeniden bağlandığında eski
+    /// bağlantı kapanırken yenisinin kaydını silmesin diye tutulur.
+    pub session: u64,
+    /// Aynı cihaz yeniden bağlanınca eski bağlantıyı hemen kapatmak için.
+    pub kick: tokio_util::sync::CancellationToken,
 }
 
 /// Bir cihazın arayüze dönen birleşik görünümü.
@@ -152,6 +157,8 @@ pub struct Registry {
     /// veritabanına `authorized` olarak kaydedilir. Cihaz DB'ye girince kayıt
     /// bırakılır (bkz. `take_waiting_key`).
     waiting_keys: RwLock<HashMap<Uuid, Vec<u8>>>,
+    /// Yetkisi kaldırılmışken başvurduğu denetim kaydına yazılmış cihazlar.
+    rejected_seen: RwLock<std::collections::HashSet<Uuid>>,
 }
 
 impl Default for Registry {
@@ -168,6 +175,7 @@ impl Registry {
             flags: RwLock::new(HashMap::new()),
             screens: RwLock::new(HashMap::new()),
             waiting_keys: RwLock::new(HashMap::new()),
+            rejected_seen: RwLock::new(Default::default()),
         }
     }
 
@@ -208,6 +216,15 @@ impl Registry {
         self.waiting_keys.write().remove(&device_id)
     }
 
+    /// Yetkisi kaldırılmış bu cihaz, konsol açıldığından beri ilk kez mi
+    /// başvuruyor?
+    ///
+    /// Böyle bir cihaz birkaç saniyede bir yeniden dener; her denemeyi
+    /// denetim kaydına yazmak tabloyu günde on binlerce satırla doldurur.
+    pub fn first_rejection(&self, device_id: Uuid) -> bool {
+        self.rejected_seen.write().insert(device_id)
+    }
+
     // --------------------------------------------------------------- bağlantı
 
     /// Cihazı bağlı olarak işaretler. Aynı cihazın önceki oturumu varsa onu döner
@@ -222,6 +239,34 @@ impl Registry {
     /// son kare atılır, yardım talebi korunur (öğretmen henüz görmemiş olabilir).
     pub fn detach(&self, device_id: Uuid) -> Option<ConnectedDevice> {
         let removed = self.connected.write().remove(&device_id);
+        self.reset_session_state(device_id);
+        removed
+    }
+
+    /// [`Self::detach`] gibi, ama yalnızca kayıtlı bağlantı hâlâ `session`
+    /// ise. Kayıt silindiyse `true` döner.
+    ///
+    /// Öğrenci kısa bir kopmadan sonra yeniden bağlandığında eski bağlantı
+    /// konsolda bir süre daha açık kalır. O kapanırken cihazı koşulsuz
+    /// silerse yeni bağlantının kaydı da gider: öğrenci bağlıdır ve ekran
+    /// gönderir, konsol ise "ağda görünüyor, bağlı değil" der.
+    pub fn detach_session(&self, device_id: Uuid, session: u64) -> bool {
+        {
+            let mut connected = self.connected.write();
+            match connected.get(&device_id) {
+                Some(c) if c.session == session => {
+                    connected.remove(&device_id);
+                }
+                _ => return false,
+            }
+        }
+        self.reset_session_state(device_id);
+        true
+    }
+
+    /// Bağlantıya bağlı geçici durumu (son kare, yayın ve kısıtlama
+    /// bayrakları) sıfırlar; yardım talebi korunur.
+    pub fn reset_session_state(&self, device_id: Uuid) {
         self.screens.write().remove(&device_id);
         if let Some(flags) = self.flags.write().get_mut(&device_id) {
             flags.streaming = false;
@@ -229,7 +274,6 @@ impl Registry {
             flags.screen_error = None;
             flags.usb_blocked = false;
         }
-        removed
     }
 
     /// Bağlı cihazın ajanı verilen asgari sürümü karşılıyor mu?
@@ -478,6 +522,8 @@ pub struct AppState {
     pub broadcast: RwLock<Option<crate::broadcast::BroadcastHandle>>,
     /// Bir öğrenci yayında eksik parça bildirdi; sonraki kare anahtar olmalı.
     pub(crate) broadcast_keyframe_requested: std::sync::atomic::AtomicBool,
+    /// Son dosya toplama işleminin durumu (bkz. [`crate::collect`]).
+    pub collection: RwLock<Option<crate::collect::Collection>>,
     /// Ağ servisleri başlatılamadıysa sebebi.
     ///
     /// Geçici bir bildirim yetmiyor: kontrol sunucusu bağlanamadığında konsol
@@ -670,6 +716,8 @@ mod tests {
             connected_at: now(),
             app_version: "0.5.1".into(),
             sender: tx,
+            session: 1,
+            kick: Default::default(),
         });
         reg.update_flags(id, |f| f.streaming = true);
         reg.push_screen_update(id, ornek_guncelleme(1, true), 100, 100);
@@ -685,6 +733,39 @@ mod tests {
             reg.screen_blob(id, 0).is_none(),
             "bağlantı kopunca eski ekran verisi atılmalı"
         );
+    }
+
+    #[test]
+    fn eski_baglanti_kapanirken_yenisinin_kaydini_silmez() {
+        let reg = Registry::new();
+        let id = Uuid::new_v4();
+        let baglanti = |session| {
+            let (tx, _rx) = mpsc::channel(8);
+            ConnectedDevice {
+                device_id: id,
+                hostname: "LAB101".into(),
+                address: "192.168.1.50:50000".parse().unwrap(),
+                connected_at: now(),
+                app_version: "0.5.2".into(),
+                sender: tx,
+                session,
+                kick: Default::default(),
+            }
+        };
+        reg.attach(baglanti(1));
+        let onceki = reg.attach(baglanti(2)).expect("eski bağlantı dönmeli");
+        assert_eq!(onceki.session, 1);
+        reg.push_screen_update(id, ornek_guncelleme(1, true), 100, 100);
+
+        assert!(!reg.detach_session(id, 1), "eski bağlantı kaydı silmemeli");
+        assert!(reg.is_online(id), "yeni bağlantı bağlı kalmalı");
+        assert!(
+            reg.screen_blob(id, 0).is_some(),
+            "yeni ekran verisi korunmalı"
+        );
+
+        assert!(reg.detach_session(id, 2));
+        assert!(!reg.is_online(id));
     }
 
     #[test]

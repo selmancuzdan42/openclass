@@ -140,6 +140,9 @@ pub fn now() -> i64 {
         .unwrap_or(0)
 }
 
+/// Denetim kayıtlarının saklandığı gün sayısı.
+const AUDIT_RETENTION_DAYS: i64 = 90;
+
 /// SQLite bağlantısını saran depo.
 ///
 /// Bağlantı tek ve `Mutex` korumalıdır. Yazma hacmi düşük olduğu için
@@ -160,7 +163,20 @@ impl Db {
             conn: Mutex::new(conn),
         };
         db.migrate()?;
+        // Denetim kaydı her bağlanma ve komutta büyür; eskiler açılışta atılır.
+        if let Err(err) = db.prune_audit(AUDIT_RETENTION_DAYS) {
+            tracing::warn!(%err, "eski denetim kayıtları silinemedi");
+        }
         Ok(db)
+    }
+
+    /// Verilen günden eski denetim kayıtlarını siler; silinen satır sayısını döner.
+    pub fn prune_audit(&self, days: i64) -> Result<usize> {
+        let cutoff = now() - days * 24 * 60 * 60;
+        Ok(self
+            .conn
+            .lock()
+            .execute("DELETE FROM audit WHERE at < ?1", params![cutoff])?)
     }
 
     /// Testler için bellek içi veritabanı.
@@ -426,6 +442,24 @@ fn row_to_device(row: &rusqlite::Row<'_>) -> rusqlite::Result<Result<Option<Devi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eski_denetim_kayitlari_silinir() {
+        let db = Db::open_in_memory().unwrap();
+        db.audit(AuditKind::DeviceConnected, None, Some("yeni"));
+        db.conn
+            .lock()
+            .execute(
+                "INSERT INTO audit (at, kind, detail) VALUES (?1, 'x', 'eski')",
+                params![now() - 100 * 24 * 60 * 60],
+            )
+            .unwrap();
+
+        assert_eq!(db.prune_audit(90).unwrap(), 1);
+        let kalan = db.recent_audit(10).unwrap();
+        assert_eq!(kalan.len(), 1);
+        assert_eq!(kalan[0].detail.as_deref(), Some("yeni"));
+    }
 
     #[test]
     fn eslestirilen_cihaz_kaydedilir_ve_okunur() {

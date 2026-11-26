@@ -100,6 +100,9 @@ export function ScreenCanvas({
   }, [deviceId, frameBaseUrl]);
 
   useEffect(() => {
+    // Sıra geriye gittiyse kaynak yayını baştan başlatmıştır (öğrenci
+    // yeniden bağlandı); tuval sıfırdan, anahtar kareyle kurulur.
+    if (seq < appliedSeq.current) appliedSeq.current = 0;
     if (seq > appliedSeq.current) void draw();
   }, [seq, draw]);
 

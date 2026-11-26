@@ -45,11 +45,14 @@ import {
   WifiOff,
 } from "lucide-react";
 
-import { api, AUDIT_LABELS, formatTime } from "./api";
+import { api, AUDIT_LABELS, checkForUpdate, formatTime } from "./api";
 import {
   AuditDialog,
   BroadcastDialog,
   CollectDialog,
+  CollectResultsDialog,
+  SendFilesDialog,
+  UpdateDialog,
   FocusDialog,
   LockDialog,
   ClassPickerDialog,
@@ -60,9 +63,9 @@ import {
   ShutdownDialog,
 } from "./dialogs";
 import { BrowseDialog } from "./BrowseDialog";
-import { open as openFileDialog, open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { TransfersDialog } from "./TransfersDialog";
 import { DetailsTable, ThumbnailGrid } from "./ListView";
+import { pushFrame, syncFrames } from "./frames";
 import { Ribbon, type RibbonTab } from "./Ribbon";
 import { StatusBar, type ListMode } from "./StatusBar";
 import {
@@ -82,6 +85,7 @@ import type {
   CrashReport,
   AuditEntry,
   BroadcastInfo,
+  CollectionView,
   DeviceGroup,
   DeviceView,
   FrameEvent,
@@ -89,7 +93,11 @@ import type {
   KeyEvent,
   PairingInfo,
   ServerInfo,
+  UpdateInfo,
 } from "./types";
+
+/** Öğretmenin "bu sürümü atla" dediği sürümün saklandığı anahtar. */
+const SKIPPED_VERSION_KEY = "openclass.skippedVersion";
 
 type ViewMode = "monitor" | "help" | "devices" | "audit";
 
@@ -134,8 +142,16 @@ function Console() {
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
   const [collectOpen, setCollectOpen] = useState(false);
-  const [shutdownTarget, setShutdownTarget] = useState<DeviceView | null>(null);
-  const [restartTarget, setRestartTarget] = useState<DeviceView | null>(null);
+  const [sendOpen, setSendOpen] = useState(false);
+  // Son dosya toplamanın sonuç tablosu.
+  const [collection, setCollection] = useState<CollectionView | null>(null);
+  const [collectionOpen, setCollectionOpen] = useState(false);
+  // Kurulu olandan yeni sürüm; öğretmene sorulur, kendiliğinden kurulmaz.
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const updateChecked = useRef(false);
+  // Kapatılacak / yeniden başlatılacak bilgisayarlar; boşsa pencere kapalı.
+  const [shutdownTargets, setShutdownTargets] = useState<DeviceView[]>([]);
+  const [restartTargets, setRestartTargets] = useState<DeviceView[]>([]);
   // Önceki çalışmadan kalan çökme kayıtları; öğretmene bir kez sorulur.
   const [crashReports, setCrashReports] = useState<CrashReport[]>([]);
   useEffect(() => {
@@ -174,7 +190,9 @@ function Console() {
     try {
       // Sunucu tarafı filtresi yerine tam liste alınır: grup sekmeleri ve
       // durum çubuğu sayaçları her zaman bütünü görmek zorunda.
-      setDevices(await api.searchDevices(""));
+      const list = await api.searchDevices("");
+      syncFrames(list);
+      setDevices(list);
     } catch (err) {
       show("error", err instanceof Error ? err.message : String(err));
     }
@@ -204,6 +222,47 @@ function Console() {
     })();
   }, [refreshDevices, refreshInfo, refreshGroups]);
 
+  /** Son toplamanın sonuç tablosunu açar. */
+  const showCollection = useCallback(() => {
+    // Olay kaçmış olabilir; güncel durum bir kez de doğrudan okunur.
+    void api.getCollection().then(setCollection).catch(() => {});
+    setCollectionOpen(true);
+  }, []);
+
+  /**
+   * Yeni sürüm var mı diye bakar. Açılışta sessizdir: internet yoksa ya da
+   * sürüm güncelse hiçbir şey göstermez; elle istendiğinde sonucu bildirir.
+   */
+  const checkUpdate = useCallback(
+    async (manual: boolean) => {
+      const current = info?.appVersion;
+      if (!current) return;
+      try {
+        const found = await checkForUpdate(current);
+        if (!found) {
+          if (manual) show("success", `OpenClass güncel (${current}).`);
+          return;
+        }
+        if (!manual && localStorage.getItem(SKIPPED_VERSION_KEY) === found.version) return;
+        setUpdate(found);
+      } catch (err) {
+        if (manual) {
+          show(
+            "error",
+            `Güncelleme denetlenemedi: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    },
+    [info?.appVersion, show],
+  );
+
+  useEffect(() => {
+    if (!info?.appVersion || updateChecked.current) return;
+    updateChecked.current = true;
+    void checkUpdate(false);
+  }, [info?.appVersion, checkUpdate]);
+
   // NetSupport'un Class Wizard'ı gibi: konsol açılınca hangi sınıfın
   // yönetileceği sorulur. Henüz seçim yapılmadıysa her zaman, yapıldıysa
   // "açılışta sor" açıkken gösterilir.
@@ -221,6 +280,11 @@ function Console() {
       listen<string | null>("control-changed", (e) => setControlled(e.payload)),
       listen("pairing-changed", () => void api.getPairing().then(setPairing).catch(() => {})),
       listen<string>("network-error", (e) => show("error", e.payload)),
+      listen<CollectionView | null>("collection-changed", (e) => setCollection(e.payload)),
+      // Bir öğrenci ajanı önceki çökmesinin kaydını iletti; öğretmene sorulur.
+      listen("crash-reports-changed", () =>
+        void api.getCrashReports().then(setCrashReports).catch(() => {}),
+      ),
       // Bağlantısı kopan öğrenciler. Elektrik kesintisi gibi durumlarda
       // hepsi birden düşer; kısa süre içinde gelenler tek bildirimde toplanır.
       listen<string>("device-disconnected", (e) => {
@@ -246,17 +310,12 @@ function Console() {
         show("info", `${e.payload.hostname} yardım istiyor.`);
         void refreshDevices();
       }),
-      // Kare olayları saniyede onlarca gelir; tüm listeyi tazelemek yerine
-      // yalnızca ilgili cihazın kare bilgisi güncellenir.
+      // Kare olayları saniyede onlarca gelir; cihaz listesine yazılmaz,
+      // yalnızca ilgili ekran yeniden çizilir (bkz. `frames.ts`). İlk karede
+      // liste bir kez tazelenir ki düğmeler ve durum göstergeleri güncellensin.
       listen<FrameEvent>("frame", (e) => {
         const { deviceId, seq, width, height } = e.payload;
-        setDevices((list) =>
-          list.map((d) =>
-            d.deviceId === deviceId
-              ? { ...d, frameSeq: seq, frameWidth: width, frameHeight: height, frameAgeMs: 0, streaming: true }
-              : d,
-          ),
-        );
+        if (pushFrame(deviceId, seq, width, height)) void refreshDevices();
       }),
       // Klavye izleme: yalnızca o an izlenen cihazın basımları listeye girer.
       listen<KeyEvent>("key-event", (e) => {
@@ -388,6 +447,40 @@ function Console() {
     [guard, show],
   );
 
+  /**
+   * Kapatma ya da yeniden başlatma komutunu verilen bilgisayarların hepsine
+   * gönderir ve sonucu tek bildirimde özetler.
+   */
+  const powerOff = useCallback(
+    async (targets: DeviceView[], restart: boolean) => {
+      const failed: string[] = [];
+      for (const d of targets) {
+        try {
+          await (restart ? api.restartDevice(d.deviceId) : api.shutdownDevice(d.deviceId));
+        } catch (err) {
+          failed.push(`${d.hostname}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      const ok = targets.length - failed.length;
+      const verb = restart ? "yeniden başlatılıyor" : "kapatılıyor";
+      if (ok > 0) {
+        show(
+          "success",
+          targets.length === 1 ? `${targets[0].hostname} ${verb}.` : `${ok} bilgisayar ${verb}.`,
+        );
+      }
+      if (failed.length > 0) {
+        show(
+          "error",
+          failed.length === 1
+            ? failed[0]
+            : `${failed.length} bilgisayara komut gönderilemedi. İlki — ${failed[0]}`,
+        );
+      }
+    },
+    [show],
+  );
+
   /** Seçili öğrencinin ekranını sınıfa gösterir. */
   const showStudentScreen = useCallback(
     async (device: DeviceView) => {
@@ -444,59 +537,6 @@ function Console() {
     if (controlled) await api.stopRemoteControl().catch(() => {});
     setFocused(null);
     await api.unfocusDevices().catch(() => {});
-  }
-
-  /**
-   * Gerçek Windows iletişim kutularıyla dosya gönderir.
-   *
-   * İki kutu art arda açılır — ikisi de işletim sisteminin kendi gezginidir
-   * (Tauri `plugin-dialog` native pencereyi açar):
-   *   1. Gönderilecek yerel dosya seçilir.
-   *   2. Hedef klasör seçilir; seçilen yol öğrencinin kullanıcı klasöründeki
-   *      karşılığına göreli olarak çözülür (Belgeler/Masaüstü/İndirilenler).
-   * Seçim iptal edilirse gönderim başlamaz. Sonuç Gönderimler listesinde izlenir.
-   */
-  async function pickAndSendFile() {
-    const hedefler = actionTargets;
-    if (hedefler.length === 0) {
-      show("error", "Dosya gönderilecek bağlı cihaz yok.");
-      return;
-    }
-
-    // 1) Gönderilecek dosya (işletim sisteminin native gezgini).
-    const picked = await openFileDialog({
-      multiple: false,
-      directory: false,
-      title: "Öğrencilere gönderilecek dosyayı seçin",
-    });
-    if (typeof picked !== "string") return;
-
-    // 2) Hedef klasör (native gezgin). Öğrencinin kullanıcı klasörüne
-    //    göreli çözülür; Öğretmen kendi makinesinde bir klasör seçer.
-    const hedef = await openFolderDialog({
-      directory: true,
-      multiple: false,
-      title: "Öğrencinin hangi klasörüne göndersin?",
-    });
-    if (typeof hedef !== "string") return;
-
-    const resolved = resolveDestination(hedef);
-    if (!resolved) {
-      show(
-        "error",
-        "Bu klasör öğrenciyle paylaşılan konumlardan değil. Belgeler, Masaüstü veya İndirilenler içinde bir klasör seçin.",
-      );
-      return;
-    }
-
-    const ids = hedefler.map((d) => d.deviceId);
-    const ok = await guard(
-      api.sendFile(ids, picked, resolved.destination, resolved.subpath),
-    );
-    if (ok !== undefined) {
-      show("success", `Dosya ${ids.length} cihaza gönderilecek: ${resolved.shown}`);
-      setTransfersOpen(true);
-    }
   }
 
   async function toggleControl() {
@@ -658,14 +698,16 @@ function Console() {
                 label: "Dosya Gönder",
                 icon: <FileUp size={18} />,
                 disabled: actionTargets.length === 0,
-                title: "Seçili öğrencilere dosya gönder",
-                onClick: pickAndSendFile,
+                title:
+                  "Seçili bilgisayarlara dosya gönderir; seçim yoksa listedeki bağlı bilgisayarların tümüne.",
+                onClick: () => setSendOpen(true),
               },
               {
                 label: "Topla",
                 icon: <FileArchive size={18} />,
                 disabled: actionTargets.length === 0,
-                title: "Seçili öğrencilerden dosya(ları) topla",
+                title:
+                  "Seçili bilgisayarlardan dosya toplar; seçim yoksa listedeki bağlı bilgisayarların tümünden.",
                 onClick: () => setCollectOpen(true),
               },
               {
@@ -765,29 +807,23 @@ function Console() {
                 label: "Yeniden Başlat",
                 icon: <RotateCw size={18} />,
                 danger: true,
-                disabled: selectedDevices.length !== 1,
+                disabled: actionTargets.length === 0,
                 title:
-                  selectedDevices.length === 1
-                    ? "Seçili öğrencinin bilgisayarını yeniden başlat"
-                    : "Tek bir cihaz seçin",
-                onClick: () => {
-                  const d = selectedDevices[0];
-                  if (d) setRestartTarget(d);
-                },
+                  actionTargets.length === 0
+                    ? "Bağlı bilgisayar yok"
+                    : "Seçili bilgisayarları yeniden başlatır; seçim yoksa listedeki bağlı bilgisayarların tümünü. Önce onay sorulur.",
+                onClick: () => setRestartTargets(actionTargetsRef.current),
               },
               {
                 label: "Bilgisayarı Kapat",
                 icon: <Power size={18} />,
                 danger: true,
-                disabled: selectedDevices.length !== 1,
+                disabled: actionTargets.length === 0,
                 title:
-                  selectedDevices.length === 1
-                    ? "Seçili öğrencinin bilgisayarını kapat"
-                    : "Tek bir cihaz seçin",
-                onClick: () => {
-                  const d = selectedDevices[0];
-                  if (d) setShutdownTarget(d);
-                },
+                  actionTargets.length === 0
+                    ? "Bağlı bilgisayar yok"
+                    : "Seçili bilgisayarları kapatır; seçim yoksa listedeki bağlı bilgisayarların tümünü. Önce onay sorulur.",
+                onClick: () => setShutdownTargets(actionTargetsRef.current),
               },
             ],
           },
@@ -1048,14 +1084,14 @@ function Console() {
           icon: <RotateCw size={13} />,
           danger: true,
           disabled: !menuDevice.online,
-          onSelect: () => setRestartTarget(menuDevice),
+          onSelect: () => setRestartTargets([menuDevice]),
         },
         {
           label: "Bilgisayarı kapat",
           icon: <Power size={13} />,
           danger: true,
           disabled: !menuDevice.online,
-          onSelect: () => setShutdownTarget(menuDevice),
+          onSelect: () => setShutdownTargets([menuDevice]),
         },
         null,
         {
@@ -1306,11 +1342,32 @@ function Console() {
         onClose={() => setMessageOpen(false)}
         onSent={refreshDevices}
       />
+      <SendFilesDialog
+        open={sendOpen}
+        targets={actionTargets}
+        onClose={() => setSendOpen(false)}
+        onSent={() => setTransfersOpen(true)}
+      />
       <CollectDialog
         open={collectOpen}
         targets={actionTargets}
         onClose={() => setCollectOpen(false)}
-        onCollected={refreshDevices}
+        onCollected={showCollection}
+        onShowResults={collection ? showCollection : undefined}
+      />
+      <CollectResultsDialog
+        open={collectionOpen}
+        collection={collection}
+        onClose={() => setCollectionOpen(false)}
+      />
+      <UpdateDialog
+        update={update}
+        current={info?.appVersion ?? ""}
+        onClose={() => setUpdate(null)}
+        onSkip={() => {
+          if (update) localStorage.setItem(SKIPPED_VERSION_KEY, update.version);
+          setUpdate(null);
+        }}
       />
       <BrowseDialog
         open={browseOpen}
@@ -1326,6 +1383,7 @@ function Console() {
           setSettingsOpen(false);
           setClassOpen(true);
         }}
+        onCheckUpdate={() => void checkUpdate(true)}
       />
       <AuditDialog open={auditOpen} onClose={() => setAuditOpen(false)} />
       <BroadcastDialog
@@ -1392,33 +1450,23 @@ function Console() {
       />
 
       <ShutdownDialog
-        open={shutdownTarget !== null}
-        device={shutdownTarget}
-        onClose={() => setShutdownTarget(null)}
-        onShutdown={async (deviceId) => {
-          const device = shutdownTarget;
-          setShutdownTarget(null);
-          if (!device) return;
-          await guard(
-            api.shutdownDevice(deviceId),
-            `${device.hostname} kapatılıyor.`,
-          );
+        targets={shutdownTargets}
+        onClose={() => setShutdownTargets([])}
+        onConfirm={() => {
+          const targets = shutdownTargets;
+          setShutdownTargets([]);
+          void powerOff(targets, false);
         }}
       />
 
       <ShutdownDialog
         restart
-        open={restartTarget !== null}
-        device={restartTarget}
-        onClose={() => setRestartTarget(null)}
-        onShutdown={async (deviceId) => {
-          const device = restartTarget;
-          setRestartTarget(null);
-          if (!device) return;
-          await guard(
-            api.restartDevice(deviceId),
-            `${device.hostname} yeniden başlatılıyor.`,
-          );
+        targets={restartTargets}
+        onClose={() => setRestartTargets([])}
+        onConfirm={() => {
+          const targets = restartTargets;
+          setRestartTargets([]);
+          void powerOff(targets, true);
         }}
       />
 
@@ -1638,66 +1686,6 @@ function AuditView() {
   );
 }
 
-/**
- * Native gezginden seçilen bir Windows yolunu öğrenciyle paylaşılan bir
- * hedefe çözer.
- *
- * Öğretmen kendi makinesinde `Belgeler → Ders Notları` gibi bir klasör
- * seçer. Seçilen yol paylaşılan köklerden birine (Belgeler / Masaüstü /
- * İndirilenler) denk geliyorsa kalan göreli yol öğrencinin kullanıcı
- * klasöründeki aynı konuma gönderilir. Yol paylaşılan köklerden hiçbirinin
- * altında değilse `null` döner.
- *
- * Klasör adları hem Türkçe hem İngilizce olabilir (`Belgeler`/`Documents`,
- * `Masaüstü`/`Desktop`, `İndirilenler`/`Downloads`).
- */
-function resolveDestination(
-  path: string,
-): { destination: "documents" | "desktop" | "downloads"; subpath: string | null; shown: string } | null {
-  const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
-  if (parts.length === 0) return null;
-
-  const last = parts[parts.length - 1]!.toLowerCase();
-  const parent = parts.length >= 2 ? parts[parts.length - 2]!.toLowerCase() : "";
-
-  // Kök klasörün kendisi mi seçildi?
-  if (destOf(last)) {
-    return {
-      destination: destOf(last)!,
-      subpath: null,
-      shown: destLabel(destOf(last)!),
-    };
-  }
-  // Kök klasörün hemen içindeki bir alt klasör mü?
-  if (destOf(parent)) {
-    return {
-      destination: destOf(parent)!,
-      subpath: last,
-      shown: `${destLabel(destOf(parent)!)} → ${parts[parts.length - 1]}`,
-    };
-  }
-  return null;
-}
-
-function destOf(s: string): "documents" | "desktop" | "downloads" | null {
-  switch (s) {
-    case "belgeler":
-    case "documents":
-      return "documents";
-    case "masaüstü":
-    case "desktop":
-      return "desktop";
-    case "indirilenler":
-    case "downloads":
-      return "downloads";
-    default:
-      return null;
-  }
-}
-
-function destLabel(d: "documents" | "desktop" | "downloads"): string {
-  return d === "documents" ? "Belgeler" : d === "desktop" ? "Masaüstü" : "İndirilenler";
-}
 
 // ------------------------------------------------------------ klavye izleme
 

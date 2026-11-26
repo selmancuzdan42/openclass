@@ -77,74 +77,119 @@ pub struct TransferView {
     pub finished: bool,
 }
 
-/// Gönderimi başlatır; arka planda yürür.
+/// Aynı anda yalnızca bir dosya gönderilir.
 ///
-/// Dosyanın okunabilir ve sınırlar içinde olduğu burada doğrulanır, böylece
-/// öğretmen hatayı anında görür.
-pub fn send(
+/// Öğrenci ajanı tek seferde tek aktarım kabul eder; ikincisini "başka bir
+/// aktarım sürüyor" diye reddeder. Birden çok dosya ve art arda başlatılan
+/// gönderimler bu kilitle sıraya girer.
+static SEND_QUEUE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Bir ya da birden çok dosyanın gönderimini başlatır; arka planda sırayla
+/// yürür. Dönen değer kuyruğa alınan dosya sayısıdır.
+///
+/// Dosyaların var olduğu ve sınırlar içinde kaldığı burada doğrulanır,
+/// böylece öğretmen hatayı anında görür ve hiçbir dosya yarım listeyle
+/// yola çıkmaz. Özet hesabı arka plana bırakılır: büyük dosyada arayüzü
+/// dondurmamalı.
+pub fn send_many(
     state: Arc<AppState>,
-    path: PathBuf,
+    paths: Vec<PathBuf>,
     targets: Vec<Uuid>,
     destination: FileDestination,
     subpath: Option<String>,
-) -> Result<(Uuid, String, u64)> {
-    let meta =
-        std::fs::metadata(&path).with_context(|| format!("dosya okunamadı: {}", path.display()))?;
-    if !meta.is_file() {
-        bail!("Yalnızca dosya gönderilebilir, klasör gönderilemez.");
-    }
-    let size = meta.len();
-    if size == 0 {
-        bail!("Boş dosya gönderilemez.");
-    }
-    if size > MAX_FILE_SIZE {
-        bail!(
-            "Dosya çok büyük ({:.1} MB); en fazla {} MB gönderilebilir.",
-            size as f64 / 1_048_576.0,
-            MAX_FILE_SIZE / 1_048_576
-        );
+) -> Result<usize> {
+    if paths.is_empty() {
+        bail!("Gönderilecek dosya seçilmedi.");
     }
 
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "dosya".to_string());
+    let mut files = Vec::with_capacity(paths.len());
+    for path in paths {
+        let meta = std::fs::metadata(&path)
+            .with_context(|| format!("dosya okunamadı: {}", path.display()))?;
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "dosya".to_string());
+        if !meta.is_file() {
+            bail!("{name}: yalnızca dosya gönderilebilir, klasör gönderilemez.");
+        }
+        let size = meta.len();
+        if size == 0 {
+            bail!("{name}: boş dosya gönderilemez.");
+        }
+        if size > MAX_FILE_SIZE {
+            bail!(
+                "{name} çok büyük ({:.1} MB); en fazla {} MB gönderilebilir.",
+                size as f64 / 1_048_576.0,
+                MAX_FILE_SIZE / 1_048_576
+            );
+        }
+        files.push((Uuid::new_v4(), path, name, size));
+    }
 
-    let sha256 = hash_file(&path)?;
-    let transfer_id = Uuid::new_v4();
-
-    // Durum kaydı önce oluşturulur; arayüz gönderim başlamadan listeyi görür.
+    // Durum kayıtları önce oluşturulur; arayüz sıradaki dosyaları da görür.
     {
         let mut all = state.transfers.write();
-        all.insert(
-            transfer_id,
-            TransferView {
-                transfer_id: transfer_id.to_string(),
-                name: name.clone(),
-                size,
-                targets: targets
-                    .iter()
-                    .map(|id| (id.to_string(), TargetState::Offered))
-                    .collect(),
-                finished: false,
-            },
-        );
+        for (transfer_id, _, name, size) in &files {
+            all.insert(
+                *transfer_id,
+                TransferView {
+                    transfer_id: transfer_id.to_string(),
+                    name: name.clone(),
+                    size: *size,
+                    targets: targets
+                        .iter()
+                        .map(|id| (id.to_string(), TargetState::Offered))
+                        .collect(),
+                    finished: false,
+                },
+            );
+        }
     }
     state.emit_transfers();
 
-    tauri::async_runtime::spawn(run(
-        Arc::clone(&state),
-        transfer_id,
-        path,
-        name.clone(),
-        size,
-        sha256,
-        targets,
-        destination,
-        subpath,
-    ));
+    let count = files.len();
+    tauri::async_runtime::spawn(async move {
+        for (transfer_id, path, name, size) in files {
+            let _turn = SEND_QUEUE.lock().await;
+            let hashed = {
+                let path = path.clone();
+                tokio::task::spawn_blocking(move || hash_file(&path)).await
+            };
+            let sha256 = match hashed {
+                Ok(Ok(sum)) => sum,
+                _ => {
+                    tracing::error!(%transfer_id, %name, "dosya özeti hesaplanamadı");
+                    for id in &targets {
+                        set_target(
+                            &state,
+                            transfer_id,
+                            *id,
+                            TargetState::Failed {
+                                reason: "Dosya okunamadı.".into(),
+                            },
+                        );
+                    }
+                    finish(&state, transfer_id);
+                    continue;
+                }
+            };
+            run(
+                Arc::clone(&state),
+                transfer_id,
+                path,
+                name,
+                size,
+                sha256,
+                targets.clone(),
+                destination,
+                subpath.clone(),
+            )
+            .await;
+        }
+    });
 
-    Ok((transfer_id, name, size))
+    Ok(count)
 }
 
 /// Dosyanın SHA-256 özeti.

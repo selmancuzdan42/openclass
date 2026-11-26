@@ -247,6 +247,12 @@ pub struct BrowseSession {
     /// Öğrenci `BrowseFileStart` gönderene kadar beklenirken bu değerin
     /// ayakta kalması gerektiği için oturumda tutulur.
     pub target_dir: Option<PathBuf>,
+    /// Öğretmenin istediği, henüz başlamamış indirmenin kimliği.
+    ///
+    /// Aynı öğrenciden o sırada toplu toplama ("Topla") dosyaları da
+    /// gelebilir; ikisi aynı mesajlarla akar. Gelen dosyanın gezgine mi
+    /// yoksa toplamaya mı ait olduğu bu kimlikle ayırt edilir.
+    pub pending_fetch: Option<Uuid>,
 }
 
 impl BrowseSession {
@@ -262,6 +268,7 @@ impl BrowseSession {
             download: None,
             download_view: None,
             target_dir: None,
+            pending_fetch: None,
         }
     }
 }

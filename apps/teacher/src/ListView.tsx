@@ -13,6 +13,7 @@ import { Hand, Monitor, MonitorOff, ShieldAlert, Unplug, WifiOff } from "lucide-
 
 import { formatTime } from "./api";
 import { ScreenCanvas } from "@openclass/screen-view";
+import { useLiveFrame } from "./frames";
 import { Empty } from "./ui";
 import type { Authorization, DeviceView } from "./types";
 
@@ -73,7 +74,8 @@ function Thumbnail({
   onContextMenu,
 }: CommonProps & { device: DeviceView }) {
   const isSelected = selected.has(device.deviceId);
-  const hasFrame = device.online && device.frameSeq > 0;
+  const frame = useLiveFrame(device);
+  const hasFrame = frame !== null;
   const stale = hasFrame && device.frameAgeMs > 10_000;
 
   return (
@@ -110,7 +112,7 @@ function Thumbnail({
           <ScreenCanvas
             deviceId={device.deviceId}
             frameBaseUrl={frameBaseUrl}
-            seq={device.frameSeq}
+            seq={frame.seq}
             alt={`${device.hostname} ekranı`}
             className="size-full object-contain"
           />
@@ -134,7 +136,7 @@ function Thumbnail({
         )}
         {hasFrame && (
           <span className="absolute bottom-1 right-1 rounded bg-black/55 px-1 py-px text-[10px] text-white/75">
-            {device.frameWidth}×{device.frameHeight}
+            {frame.width}×{frame.height}
           </span>
         )}
       </div>

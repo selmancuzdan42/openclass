@@ -3,7 +3,14 @@ import { useEffect, useMemo, useState } from "react";
 
 import { api, AUDIT_LABELS, formatTime, sendCrashReport } from "./api";
 import { ScreenCanvas } from "@openclass/screen-view";
+import { useLiveFrame } from "./frames";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import {
+  Download,
+  FileText,
+  FileUp,
+  Folder,
+  FolderOpen,
   Lock,
   MousePointerBan,
   MousePointerClick,
@@ -18,18 +25,22 @@ import {
   RefreshCw,
   RotateCw,
   Trash2,
+  X,
 } from "lucide-react";
 
 import { RemoteControlSurface } from "./RemoteControlSurface";
 import { Button, Empty, Field, Modal, TextInput, useToast } from "./ui";
 import type {
   AuditEntry,
+  CollectionView,
+  CollectTarget,
   CrashReport,
   DeviceGroup,
   DeviceView,
   FileDestination,
   PairingInfo,
   ServerInfo,
+  UpdateInfo,
 } from "./types";
 
 // ------------------------------------------------------------- eşleştirme
@@ -200,8 +211,8 @@ export function FocusDialog({
   onScreenshot: () => void;
   onClose: () => void;
 }) {
-  const ratio =
-    device && device.frameHeight > 0 ? device.frameWidth / device.frameHeight : 16 / 9;
+  const frame = useLiveFrame(device);
+  const ratio = frame && frame.height > 0 ? frame.width / frame.height : 16 / 9;
 
   return (
     <Modal
@@ -213,8 +224,8 @@ export function FocusDialog({
         device && (
           <>
             <span className="mr-auto text-[11px] text-[var(--color-text-3)]">
-              {device.frameWidth}×{device.frameHeight} · {device.address ?? "—"} · kare #
-              {device.frameSeq}
+              {frame?.width ?? 0}×{frame?.height ?? 0} · {device.address ?? "—"} · kare #
+              {frame?.seq ?? 0}
             </span>
             {controlled && (
               <span className="mr-2 flex items-center gap-1.5 rounded bg-[var(--color-warn)]
@@ -224,7 +235,7 @@ export function FocusDialog({
               </span>
             )}
             <Button
-              disabled={device.frameSeq === 0}
+              disabled={!frame}
               title="Görüntülenen ekranı Resimler/OpenClass klasörüne kaydeder"
               onClick={onScreenshot}
             >
@@ -250,12 +261,12 @@ export function FocusDialog({
       }
     >
       {device &&
-        (device.frameSeq > 0 ? (
+        (frame ? (
           <RemoteControlSurface active={controlled} aspectRatio={ratio}>
             <ScreenCanvas
               deviceId={device.deviceId}
               frameBaseUrl={frameBaseUrl}
-              seq={device.frameSeq}
+              seq={frame.seq}
               alt={`${device.hostname} ekranı`}
               className="max-h-[70vh] w-full bg-[#101418] object-contain"
             />
@@ -280,6 +291,7 @@ export function SettingsDialog({
   onClose,
   onSaved,
   onChangeClass,
+  onCheckUpdate,
 }: {
   open: boolean;
   info: ServerInfo | null;
@@ -287,6 +299,8 @@ export function SettingsDialog({
   onSaved: () => void;
   /** Sınıf seçim penceresini açar. */
   onChangeClass: () => void;
+  /** Yeni sürüm olup olmadığına bakar ve sonucu bildirir. */
+  onCheckUpdate: () => void;
 }) {
   const { guard } = useToast();
   const [teacherName, setTeacherName] = useState("");
@@ -307,6 +321,12 @@ export function SettingsDialog({
       onClose={onClose}
       footer={
         <>
+          <span className="mr-auto flex items-center gap-2 text-[11px] text-[var(--color-text-3)]">
+            Sürüm {info?.appVersion ?? "—"}
+            <Button onClick={onCheckUpdate} title="GitHub'da yeni sürüm var mı diye bakar">
+              <RefreshCw size={12} /> Güncellemeleri denetle
+            </Button>
+          </span>
           <Button onClick={onClose}>Vazgeç</Button>
           <Button
             tone="accent"
@@ -1003,53 +1023,335 @@ export function ClassPickerDialog({
   );
 }
 
-// ------------------------------------------------------------------ toplama
+// ---------------------------------------------------- dosya gönder / topla
 
-/** Dosya toplama için İndirilenler gibi köklerin Türkçe etiketi. */
 const ROOT_LABELS: Record<FileDestination, string> = {
   desktop: "Masaüstü",
   documents: "Belgeler",
   downloads: "İndirilenler",
 };
 
-/** Tek bir kökün seçileceği, sırayı koruyan sabit liste. */
+const ROOT_ICONS: Record<FileDestination, React.ReactNode> = {
+  desktop: <Monitor size={14} />,
+  documents: <Folder size={14} />,
+  downloads: <Download size={14} />,
+};
+
 const ROOT_OPTIONS: FileDestination[] = ["desktop", "documents", "downloads"];
 
+/** Öğrencinin kullanıcı klasörlerinden birini seçtiren üçlü düğme. */
+function RootPicker({
+  value,
+  onChange,
+}: {
+  value: FileDestination;
+  onChange: (root: FileDestination) => void;
+}) {
+  return (
+    <div role="radiogroup" className="grid grid-cols-3 gap-1.5">
+      {ROOT_OPTIONS.map((r) => {
+        const active = r === value;
+        return (
+          <button
+            key={r}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(r)}
+            className={`flex h-[34px] items-center justify-center gap-1.5 rounded-md border
+              text-[12px] font-medium transition-colors ${
+                active
+                  ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
+                  : `border-[var(--color-stroke-strong)] text-[var(--color-text-2)]
+                     hover:border-[var(--color-accent)] hover:text-[var(--color-text)]`
+              }`}
+          >
+            {ROOT_ICONS[r]}
+            {ROOT_LABELS[r]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** İşlemin uygulanacağı bilgisayarların özeti. */
+function TargetStrip({ targets }: { targets: DeviceView[] }) {
+  const shown = targets.slice(0, 6).map((d) => d.hostname).join(", ");
+  const rest = targets.length - 6;
+  return (
+    <div
+      className="flex items-center gap-2 rounded-md bg-[var(--color-surface-2)] px-2.5 py-2
+        text-[11px] text-[var(--color-text-2)]"
+      title={targets.map((d) => d.hostname).join(", ")}
+    >
+      <span
+        className="shrink-0 rounded bg-[var(--color-accent)] px-1.5 py-0.5 text-[11px]
+          font-semibold text-white"
+      >
+        {targets.length} bilgisayar
+      </span>
+      <span className="truncate">
+        {targets.length === 0
+          ? "Bağlı bilgisayar yok"
+          : `${shown}${rest > 0 ? ` ve ${rest} bilgisayar daha` : ""}`}
+      </span>
+    </div>
+  );
+}
+
+/** Numaralı bölüm başlığı: pencerenin adımlarını sırayla okutur. */
+function Step({
+  n,
+  title,
+  children,
+}: {
+  n: number;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <h4 className="mb-1.5 flex items-center gap-2 text-[12px] font-semibold">
+        <span
+          className="flex size-[18px] items-center justify-center rounded-full
+            bg-[var(--color-surface-2)] text-[10.5px] text-[var(--color-text-2)]"
+        >
+          {n}
+        </span>
+        {title}
+      </h4>
+      {children}
+    </section>
+  );
+}
+
+/** Yoldan dosya adını ayırır (Windows ve Unix ayırıcılarıyla). */
+function baseName(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}
+
+/** Alt klasör adında kabul edilmeyen bir şey varsa açıklamasını döner. */
+function subfolderProblem(value: string): string | null {
+  const v = value.trim();
+  if (!v) return null;
+  if (/[:*?"<>|]/.test(v)) return 'Klasör adında : * ? " < > | kullanılamaz.';
+  if (/^[\\/]/.test(v) || v.split(/[\\/]/).some((p) => !p.trim() || p === "." || p === ".."))
+    return "Yalnızca klasör adı yazın (örnek: Sınav ya da Ödevler/Hafta 3).";
+  return null;
+}
+
 /**
- * Seçili öğrencilerin bilgisayarından dosya toplama isteği.
+ * Seçili bilgisayarlara dosya gönderme.
  *
- * Öğretmen bir kök (varsayılan Masaüstü) ve bir desen verir; onayda her
- * hedefe `CollectRequest` gönderilir. `deleteSource` işaretliyse gönderim
- * doğrulandığında kaynak dosya öğrenciden silinir.
+ * Birden çok dosya seçilebilir; hepsi bütün hedeflere sırayla gider. Hedef,
+ * öğrencinin kendi kullanıcı klasörlerinden biridir; dosyalar doğrudan oraya
+ * ya da adı verilen alt klasöre kaydedilir.
+ */
+export function SendFilesDialog({
+  open,
+  targets,
+  onClose,
+  onSent,
+}: {
+  open: boolean;
+  targets: DeviceView[];
+  onClose: () => void;
+  onSent: () => void;
+}) {
+  const { guard, show } = useToast();
+  const [files, setFiles] = useState<string[]>([]);
+  const [root, setRoot] = useState<FileDestination>("desktop");
+  const [subfolder, setSubfolder] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setFiles([]);
+    setSubfolder("");
+    setBusy(false);
+  }, [open]);
+
+  async function addFiles() {
+    const picked = await openFileDialog({
+      multiple: true,
+      directory: false,
+      title: "Gönderilecek dosyaları seçin",
+    });
+    if (!picked) return;
+    const list = Array.isArray(picked) ? picked : [picked];
+    setFiles((prev) => [...prev, ...list.filter((p) => !prev.includes(p))]);
+  }
+
+  const problem = subfolderProblem(subfolder);
+  const place = subfolder.trim()
+    ? `${ROOT_LABELS[root]}\\${subfolder.trim().replace(/\//g, "\\")}`
+    : ROOT_LABELS[root];
+
+  async function send() {
+    setBusy(true);
+    const n = await guard(
+      api.sendFiles(
+        targets.map((d) => d.deviceId),
+        files,
+        root,
+        subfolder.trim() || null,
+      ),
+    );
+    setBusy(false);
+    if (n === undefined) return;
+    show(
+      "success",
+      `${n === 1 ? baseName(files[0] ?? "") : `${n} dosya`} ${targets.length} bilgisayara gönderiliyor: ${place}`,
+    );
+    onSent();
+    onClose();
+  }
+
+  return (
+    <Modal
+      open={open}
+      title="Dosya gönder"
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>Vazgeç</Button>
+          <Button
+            tone="accent"
+            onClick={send}
+            disabled={busy || files.length === 0 || targets.length === 0 || problem !== null}
+          >
+            <FileUp size={13} />
+            {busy ? "Gönderiliyor…" : `${targets.length} bilgisayara gönder`}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <TargetStrip targets={targets} />
+
+        <Step n={1} title="Dosyalar">
+          <div className="rounded-md border border-[var(--color-stroke-strong)]">
+            {files.length === 0 ? (
+              <button
+                type="button"
+                onClick={addFiles}
+                className="flex w-full flex-col items-center gap-1 px-3 py-5 text-center
+                  text-[var(--color-text-3)] hover:text-[var(--color-accent)]"
+              >
+                <FileUp size={20} />
+                <span className="text-[12px] font-medium">Dosya seçmek için tıklayın</span>
+                <span className="text-[11px]">Birden çok dosya seçebilirsiniz.</span>
+              </button>
+            ) : (
+              <>
+                <ul className="max-h-[132px] divide-y divide-[var(--color-stroke)] overflow-auto">
+                  {files.map((path) => (
+                    <li key={path} className="flex items-center gap-2 px-2.5 py-1.5" title={path}>
+                      <FileText size={13} className="shrink-0 text-[var(--color-text-3)]" />
+                      <span className="truncate text-[12px]">{baseName(path)}</span>
+                      <button
+                        type="button"
+                        aria-label={`${baseName(path)} dosyasını listeden çıkar`}
+                        onClick={() => setFiles((prev) => prev.filter((p) => p !== path))}
+                        className="ml-auto shrink-0 rounded p-0.5 text-[var(--color-text-3)]
+                          hover:bg-[var(--color-surface-2)] hover:text-[var(--color-danger)]"
+                      >
+                        <X size={13} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <div
+                  className="flex items-center border-t border-[var(--color-stroke)]
+                    bg-[var(--color-surface-2)] px-2.5 py-1.5"
+                >
+                  <span className="text-[11px] text-[var(--color-text-3)]">
+                    {files.length} dosya
+                  </span>
+                  <Button className="ml-auto" onClick={addFiles}>
+                    <Plus size={13} /> Dosya ekle
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        </Step>
+
+        <Step n={2} title="Öğrencide nereye kaydedilsin?">
+          <RootPicker value={root} onChange={setRoot} />
+          <div className="mt-2">
+            <Field
+              label="Alt klasör (isteğe bağlı)"
+              hint={
+                problem ??
+                `Dosyalar öğrencinin ${place} klasörüne kaydedilir. Aynı adlı dosyanın üzerine yazılmaz.`
+              }
+            >
+              <TextInput
+                className="w-full"
+                value={subfolder}
+                onChange={(e) => setSubfolder(e.target.value)}
+                placeholder="Boş bırakılırsa doğrudan klasörün içine"
+                aria-invalid={problem !== null}
+              />
+            </Field>
+          </div>
+        </Step>
+      </div>
+    </Modal>
+  );
+}
+
+/** Toplama deseni için hazır seçenekler. */
+const PATTERN_PRESETS: { label: string; pattern: string }[] = [
+  { label: "Tüm dosyalar", pattern: "*" },
+  { label: "ZIP", pattern: "*.zip" },
+  { label: "Word", pattern: "*.docx" },
+  { label: "PDF", pattern: "*.pdf" },
+  { label: "Resim", pattern: "*.png" },
+];
+
+/**
+ * Seçili bilgisayarlardan dosya toplama.
+ *
+ * Öğretmen bir klasör ve bir dosya adı (ya da `*.zip` gibi bir desen) verir;
+ * her öğrenci o klasörde uyan dosyaları gönderir. Toplananlar öğretmenin
+ * bilgisayarında, her öğrencinin kendi adını taşıyan klasöre kaydedilir.
  */
 export function CollectDialog({
   open,
   targets,
   onClose,
   onCollected,
+  onShowResults,
 }: {
   open: boolean;
   targets: DeviceView[];
   onClose: () => void;
   onCollected: () => void;
+  /** Önceki toplamanın sonuç tablosunu açar; toplama yapılmadıysa verilmez. */
+  onShowResults?: () => void;
 }) {
   const { guard, show } = useToast();
   const [root, setRoot] = useState<FileDestination>("desktop");
   const [pattern, setPattern] = useState("");
   const [deleteSource, setDeleteSource] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [saveDir, setSaveDir] = useState("");
 
   useEffect(() => {
     if (!open) return;
     setRoot("desktop");
     setPattern("sınav.zip");
     setDeleteSource(false);
+    void api.getDownloadRoot().then(setSaveDir).catch(() => setSaveDir(""));
   }, [open]);
 
   async function collect() {
     const p = pattern.trim();
     if (!p) {
-      show("error", "Desen boş olamaz.");
+      show("error", "Dosya adı boş olamaz.");
       return;
     }
     setBusy(true);
@@ -1063,7 +1365,6 @@ export function CollectDialog({
     );
     setBusy(false);
     if (sent !== undefined) {
-      show("success", `${sent} cihaza toplama isteği gönderildi.`);
       onCollected();
       onClose();
     }
@@ -1076,52 +1377,92 @@ export function CollectDialog({
       onClose={onClose}
       footer={
         <>
+          {onShowResults && (
+            <Button
+              className="mr-auto"
+              onClick={() => {
+                onClose();
+                onShowResults();
+              }}
+            >
+              Son sonuçlar
+            </Button>
+          )}
           <Button onClick={onClose}>Vazgeç</Button>
           <Button
-            tone="accent"
+            tone={deleteSource ? "danger" : "accent"}
             onClick={collect}
-            disabled={busy || targets.length === 0}
+            disabled={busy || targets.length === 0 || !pattern.trim()}
           >
-            <FileArchive size={13} /> {busy ? "Gönderiliyor…" : "Topla"}
+            <FileArchive size={13} />
+            {busy ? "İsteniyor…" : `${targets.length} bilgisayardan topla`}
           </Button>
         </>
       }
     >
-      <p className="mb-3 text-[11px] text-[var(--color-text-2)]">
-        Hedef: {targets.length === 0 ? "bağlı cihaz yok" : targets.map((d) => d.hostname).join(", ")}
-      </p>
-      <div className="space-y-3">
-        <Field
-          label="Tarancak kök"
-          hint="Öğrencinin kendi kullanıcı klasöründeki konum."
-        >
-          <select
-            value={root}
-            onChange={(e) => setRoot(e.target.value as FileDestination)}
-            className="h-[26px] w-full rounded border border-[var(--color-stroke-strong)]
-              bg-[var(--color-surface)] px-2 text-[12px]
-              focus:border-[var(--color-accent)] focus:outline-none"
-          >
-            {ROOT_OPTIONS.map((r) => (
-              <option key={r} value={r}>
-                {ROOT_LABELS[r]}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field
-          label="Desen"
-          hint="Tam dosya adı (sınav.zip) veya joker (kök altındaki *.zip dosyaları)."
-        >
+      <div className="space-y-4">
+        <TargetStrip targets={targets} />
+
+        <Step n={1} title="Öğrencinin hangi klasöründen?">
+          <RootPicker value={root} onChange={setRoot} />
+        </Step>
+
+        <Step n={2} title="Hangi dosyalar?">
           <TextInput
             className="w-full font-mono"
             value={pattern}
             onChange={(e) => setPattern(e.target.value)}
-            placeholder="sınav.zip veya *.zip"
+            placeholder="sınav.zip"
+            aria-label="Dosya adı ya da desen"
           />
-        </Field>
-        <label className="flex cursor-pointer items-start gap-2 rounded border border-[var(--color-stroke-strong)]
-          p-2.5">
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {PATTERN_PRESETS.map((preset) => (
+              <button
+                key={preset.pattern}
+                type="button"
+                onClick={() => setPattern(preset.pattern)}
+                className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+                  pattern.trim() === preset.pattern
+                    ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
+                    : `border-[var(--color-stroke-strong)] text-[var(--color-text-2)]
+                       hover:border-[var(--color-accent)]`
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--color-text-3)]">
+            Tam dosya adı yazın ya da yıldızla tür seçin (*.zip). Yalnızca{" "}
+            {ROOT_LABELS[root]} klasörünün içindeki dosyalara bakılır; alt klasörlere girilmez.
+          </p>
+        </Step>
+
+        <Step n={3} title="Toplananlar nereye kaydedilecek?">
+          <div
+            className="flex items-center gap-2 rounded-md border border-[var(--color-stroke-strong)]
+              px-2.5 py-1.5"
+          >
+            <FolderOpen size={14} className="shrink-0 text-[var(--color-text-3)]" />
+            <span data-selectable className="min-w-0 truncate text-[11.5px]" title={saveDir}>
+              {saveDir || "Belgeler\\OpenClass\\Toplanan"}
+            </span>
+            <Button className="ml-auto shrink-0" onClick={() => void guard(api.openDownloadsDir())}>
+              Aç
+            </Button>
+          </div>
+          <p className="mt-1.5 text-[11px] text-[var(--color-text-3)]">
+            Her öğrencinin dosyaları kendi bilgisayar adını taşıyan klasöre kaydedilir.
+          </p>
+        </Step>
+
+        <label
+          className={`flex cursor-pointer items-start gap-2 rounded-md border p-2.5 ${
+            deleteSource
+              ? "border-[var(--color-danger)] bg-[var(--color-danger)]/5"
+              : "border-[var(--color-stroke-strong)]"
+          }`}
+        >
           <input
             type="checkbox"
             checked={deleteSource}
@@ -1130,11 +1471,11 @@ export function CollectDialog({
           />
           <span className="min-w-0">
             <span className="block text-[12px] font-medium">
-              Toplandıktan sonra kaynaktan sil
+              Toplandıktan sonra öğrenciden sil
             </span>
             <span className="block text-[11px] leading-relaxed text-[var(--color-text-3)]">
-              Gönderim doğrulandığında dosya öğrencinin bilgisayarından kalıcı
-              olarak kaldırılır. Geri alınamaz.
+              Dosya öğretmene ulaştığı doğrulanınca öğrencinin bilgisayarından kalıcı olarak
+              silinir. Geri alınamaz.
             </span>
           </span>
         </label>
@@ -1143,38 +1484,236 @@ export function CollectDialog({
   );
 }
 
+/** Toplama tablosunda bir satırın durum yazısı ve rengi. */
+function collectStatus(t: CollectTarget): { text: string; tone: "ok" | "warn" | "danger" | "muted" } {
+  const files = `${t.files} dosya`;
+  if (t.errors.length > 0 && t.files === 0) return { text: t.errors[0]!, tone: "danger" };
+  switch (t.state) {
+    case "waiting":
+      return { text: "Bekleniyor…", tone: "muted" };
+    case "receiving":
+      return { text: `${files} alındı, sürüyor…`, tone: "muted" };
+    case "done":
+      if (t.matched === 0) return { text: "Dosya bulunamadı", tone: "warn" };
+      if (t.errors.length > 0 || (t.matched !== null && t.files < t.matched))
+        return { text: `${files} alındı, ${t.matched ?? "?"} dosyadan`, tone: "warn" };
+      return { text: `${files} teslim edildi`, tone: "ok" };
+    case "no_reply":
+      return t.files > 0
+        ? { text: `${files} alındı`, tone: "ok" }
+        : { text: "Yanıt yok (dosya yok ya da eski sürüm)", tone: "warn" };
+    case "offline":
+      return t.files > 0
+        ? { text: `${files} alındı, bağlantı koptu`, tone: "warn" }
+        : { text: "Bağlı değil", tone: "danger" };
+  }
+}
+
+const COLLECT_TONE = {
+  ok: "text-[var(--color-ok)]",
+  warn: "text-[var(--color-warn)]",
+  danger: "text-[var(--color-danger)]",
+  muted: "text-[var(--color-text-3)]",
+};
+
+/**
+ * Dosya toplamanın sonuç tablosu: kim teslim etti, kimde dosya yok, kimde
+ * hata var. Toplama sürerken canlı güncellenir.
+ */
+export function CollectResultsDialog({
+  open,
+  collection,
+  onClose,
+}: {
+  open: boolean;
+  collection: CollectionView | null;
+  onClose: () => void;
+}) {
+  const { guard } = useToast();
+  const targets = collection?.targets ?? [];
+  const delivered = targets.filter((t) => t.files > 0).length;
+  const busy = targets.some((t) => t.state === "waiting" || t.state === "receiving");
+  const total = targets.reduce((n, t) => n + t.files, 0);
+
+  return (
+    <Modal
+      open={open && collection !== null}
+      title="Dosya toplama sonuçları"
+      width="md"
+      onClose={onClose}
+      footer={
+        <>
+          <span className="mr-auto text-[11px] text-[var(--color-text-3)]">
+            {busy ? "Toplama sürüyor…" : "Toplama bitti."}
+          </span>
+          <Button onClick={() => void guard(api.openDownloadsDir())}>
+            <FolderOpen size={13} /> Klasörü aç
+          </Button>
+          <Button tone="accent" onClick={onClose}>
+            Kapat
+          </Button>
+        </>
+      }
+    >
+      {collection && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { label: "Teslim eden", value: `${delivered} / ${targets.length}` },
+              { label: "Toplanan dosya", value: String(total) },
+              { label: "Aranan", value: `${collection.root} · ${collection.pattern}` },
+            ].map((m) => (
+              <div
+                key={m.label}
+                className="rounded-md bg-[var(--color-surface-2)] px-2.5 py-2"
+                title={m.value}
+              >
+                <div className="text-[10.5px] text-[var(--color-text-3)]">{m.label}</div>
+                <div className="truncate text-[13px] font-semibold">{m.value}</div>
+              </div>
+            ))}
+          </div>
+
+          <table className="w-full border-collapse text-[12px]">
+            <thead>
+              <tr className="border-b border-[var(--color-stroke)] text-left text-[11px]
+                text-[var(--color-text-3)]">
+                <th className="py-1.5 pr-3 font-medium">Bilgisayar</th>
+                <th className="py-1.5 font-medium">Durum</th>
+              </tr>
+            </thead>
+            <tbody>
+              {targets.map((t) => {
+                const status = collectStatus(t);
+                return (
+                  <tr key={t.deviceId} className="border-b border-[var(--color-stroke)] align-top">
+                    <td className="py-1.5 pr-3 font-medium">{t.hostname}</td>
+                    <td className={`py-1.5 ${COLLECT_TONE[status.tone]}`}>
+                      {status.text}
+                      {t.errors.length > 0 && t.files > 0 && (
+                        <span data-selectable className="block text-[11px] text-[var(--color-danger)]">
+                          {t.errors.slice(0, 3).join(" · ")}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          <p data-selectable className="text-[11px] text-[var(--color-text-3)]" title={collection.dir}>
+            Dosyalar {collection.dir} klasöründe, her bilgisayarın kendi adını taşıyan klasöre
+            kaydedildi.
+            {collection.deleteSource && " Teslim edilen dosyalar öğrenci bilgisayarından silindi."}
+          </p>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------- güncelleme
+
+/**
+ * Yeni sürüm bildirimi.
+ *
+ * Program kendini güncellemez; öğretmen isterse indirme sayfası açılır.
+ * "Bu sürümü atla" denirse aynı sürüm için bir daha sorulmaz.
+ */
+export function UpdateDialog({
+  update,
+  current,
+  onSkip,
+  onClose,
+}: {
+  update: UpdateInfo | null;
+  current: string;
+  onSkip: () => void;
+  onClose: () => void;
+}) {
+  const { guard } = useToast();
+
+  return (
+    <Modal
+      open={update !== null}
+      title="Yeni sürüm var"
+      onClose={onClose}
+      footer={
+        <>
+          <Button className="mr-auto" onClick={onSkip}>
+            Bu sürümü atla
+          </Button>
+          <Button onClick={onClose}>Sonra</Button>
+          <Button
+            tone="accent"
+            onClick={async () => {
+              await guard(api.openReleasePage());
+              onClose();
+            }}
+          >
+            <Download size={13} /> İndirme sayfasını aç
+          </Button>
+        </>
+      }
+    >
+      {update && (
+        <div className="space-y-2.5">
+          <p className="text-[12px] leading-relaxed">
+            OpenClass <strong>{update.version}</strong> yayımlandı. Bu bilgisayarda{" "}
+            <strong>{current}</strong> kurulu.
+          </p>
+          {update.notes && (
+            <pre
+              data-selectable
+              className="max-h-[180px] overflow-auto whitespace-pre-wrap rounded border
+                border-[var(--color-stroke)] bg-[var(--color-surface-2)] p-2.5 font-sans
+                text-[11px] leading-relaxed text-[var(--color-text-2)]"
+            >
+              {update.notes}
+            </pre>
+          )}
+          <p className="text-[11px] leading-relaxed text-[var(--color-text-3)]">
+            Hiçbir şey kendiliğinden indirilmez ya da kurulmaz. Yeni sürümü kurarsanız öğrenci
+            bilgisayarlarındaki programı da aynı sürüme güncelleyin.
+          </p>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 // ---------------------------------------------------------- uzaktan kapatma
 
 /** Tek bir öğrencinin bilgisayarını kapatma onayı. */
 export function ShutdownDialog({
-  open,
-  device,
+  targets,
   onClose,
-  onShutdown,
+  onConfirm,
   restart = false,
 }: {
-  open: boolean;
-  device: DeviceView | null;
+  /** İşlemin uygulanacağı bilgisayarlar; boşsa pencere kapalıdır. */
+  targets: DeviceView[];
   onClose: () => void;
-  onShutdown: (deviceId: string) => void;
+  onConfirm: () => void;
   /** Kapatmak yerine yeniden başlat. */
   restart?: boolean;
 }) {
+  const many = targets.length > 1;
+  const action = restart ? "yeniden başlatılacak" : "kapatılacak";
+  const subject = many ? `${targets.length} bilgisayar` : (targets[0]?.hostname ?? "");
+
   return (
     <Modal
-      open={open && device !== null}
-      title={device ? `${device.hostname} ${restart ? "yeniden başlatılacak" : "kapatılacak"}` : ""}
+      open={targets.length > 0}
+      title={`${subject} ${action}`}
       onClose={onClose}
       footer={
         <>
           <Button onClick={onClose}>Vazgeç</Button>
-          <Button
-            tone="danger"
-            disabled={!device}
-            onClick={() => device && onShutdown(device.deviceId)}
-          >
+          <Button tone="danger" onClick={onConfirm}>
             {restart ? <RotateCw size={13} /> : <Power size={13} />}
-            {restart ? "Yeniden Başlat" : "Bilgisayarı Kapat"}
+            {restart ? "Yeniden Başlat" : many ? "Bilgisayarları Kapat" : "Bilgisayarı Kapat"}
           </Button>
         </>
       }
@@ -1182,14 +1721,20 @@ export function ShutdownDialog({
       <div className="space-y-3 p-3">
         <p className="rounded bg-[var(--color-warn)]/10 p-2.5 text-[12px] leading-relaxed
           text-[var(--color-text)]">
-          <strong>{device?.hostname ?? "Bu cihaz"}</strong> bilgisayarı{" "}
-          {restart ? "yeniden başlatılacak" : "kapatılacak"}. Komut geri alınamaz;
-          öğrenciye önce kısa bir bildirim gösterilir.
+          <strong>{subject}</strong> {action}. Komut geri alınamaz; öğrencilere önce kısa bir
+          bildirim gösterilir.
         </p>
+        {many && (
+          // Toplu işlemde hangi bilgisayarların etkileneceği açıkça görünsün.
+          <p data-selectable className="max-h-[120px] overflow-auto rounded border
+            border-[var(--color-stroke)] p-2 text-[11px] leading-relaxed text-[var(--color-text-2)]">
+            {targets.map((d) => d.hostname).join(", ")}
+          </p>
+        )}
         <p className="text-[11px] leading-relaxed text-[var(--color-text-3)]">
           {restart
-            ? "Kaydedilmemiş çalışma kaybolabilir. Bilgisayar açıldığında öğrenci ajanı kendiliğinden yeniden bağlanır."
-            : "Kaydedilmemiş çalışma kaybolabilir. Makineyi yeniden açmak için öğrencinin fişle açması veya birinden yardım istemesi gerekir."}
+            ? "Kaydedilmemiş çalışma kaybolabilir. Bilgisayarlar açıldığında öğrenci ajanı kendiliğinden yeniden bağlanır."
+            : "Kaydedilmemiş çalışma kaybolabilir. Kapanan bilgisayarlar konsoldan yeniden açılamaz."}
         </p>
       </div>
     </Modal>
@@ -1243,7 +1788,11 @@ export function CrashReportDialog({
   return (
     <Modal
       open={reports.length > 0}
-      title="OpenClass beklenmedik şekilde kapandı"
+      title={
+        reports.every((r) => r.app !== "teacher")
+          ? "Öğrenci programı beklenmedik şekilde kapandı"
+          : "OpenClass beklenmedik şekilde kapandı"
+      }
       onClose={() => void finish(false)}
       footer={
         <>
@@ -1262,9 +1811,9 @@ export function CrashReportDialog({
           bilginin tamamı aşağıdadır. Bilgisayar adı, kullanıcı adı, IP adresi ve ekran içeriği{" "}
           <strong>gönderilmez</strong>.
         </p>
-        {reports.map((r) => (
+        {reports.map((r, i) => (
           <dl
-            key={r.at}
+            key={`${r.at}-${i}`}
             data-selectable
             className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded border
               border-[var(--color-stroke)] bg-[var(--color-surface-2)] p-2.5 text-[11px]"

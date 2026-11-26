@@ -19,8 +19,8 @@ pub mod discovery;
 pub mod multicast;
 
 pub use control::{
-    BrowseEntry, BrowseRoot, ClientMessage, InputEvent, MouseButton, MulticastInfo, ScreenRect,
-    ServerMessage, StreamQuality,
+    BrowseEntry, BrowseRoot, ClientMessage, CrashRecord, InputEvent, MouseButton, MulticastInfo,
+    ScreenRect, ServerMessage, StreamQuality,
 };
 pub use discovery::DiscoveryPacket;
 

@@ -3,6 +3,61 @@
 Bu dosya [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/) biçimini,
 sürüm numaraları [Semantic Versioning](https://semver.org/lang/tr/) kurallarını izler.
 
+## [0.6.0] — 2026-11-26
+
+Öğretmen ve öğrenci programı **birlikte** güncellenmelidir: toplama sonuçları,
+öğrenci hata raporları ve klasörsüz dosya gönderimi yeni öğrenci ajanını
+gerektirir.
+
+### Eklendi
+- **Toplu kapatma ve yeniden başlatma.** Komut seçili bilgisayarlara, seçim
+  yoksa listedeki bağlı bilgisayarların tümüne uygulanır. Önce etkilenecek
+  bilgisayarlar gösterilip onay alınır; sonuç tek bildirimde özetlenir.
+- **Birden çok dosya gönderme.** Yeni "Dosya gönder" penceresinde birden çok
+  dosya seçilir; hepsi bütün hedef bilgisayarlara sırayla gider.
+- **Dosya toplama sonuç tablosu.** Kimin kaç dosya teslim ettiği, kimde dosya
+  bulunmadığı, kimin yanıt vermediği konsolda canlı görünür.
+- **Güncelleme denetimi.** Konsol açılışta GitHub'daki son sürüme bakar ve
+  yeni sürüm varsa öğretmene sorar. Hiçbir şey kendiliğinden indirilmez ya
+  da kurulmaz; onay verilirse yalnızca indirme sayfası açılır.
+- **Öğrenci hata raporları.** Öğrenci ajanının çökme kaydı öğretmen
+  konsoluna iletilir ve öğretmenin onayıyla gönderilir. Kayıt hangi
+  bilgisayardan geldiğini taşımaz.
+- Sınıf, öğretmen bilgisayarının adından kendiliğinden önerilir ve kaydedilir
+  (`BLAB1-OGR` → `BLAB1`). Açılıştaki sınıf sorusu sürer; öneri seçili gelir.
+
+### Değiştirildi
+- **Gönderilen dosyalar artık `OpenClass` klasörüne değil, doğrudan seçilen
+  klasöre** (Masaüstü, Belgeler ya da İndirilenler) kaydedilir. İsteğe bağlı
+  bir alt klasör adı verilebilir. Hedef, öğretmenin kendi bilgisayarında
+  klasör seçtirilerek değil, üç düğmeyle belirlenir.
+- "Dosya topla" penceresi yeniden tasarlandı: hazır dosya türleri ve
+  toplananların kaydedileceği klasör pencerede görünür.
+- **İnternet engeli oturuma bağlandı.** Bağlantı kopunca ve ajan açılırken
+  kendiliğinden kalkar; öğretmen yokken bilgisayar internetsiz kalmaz.
+- Öğrenci yapılandırma penceresi yalnızca hiçbir konsola bağlanmamış
+  bilgisayarda kendiliğinden açılır.
+- Denetim kaydında 90 günden eski satırlar konsol açılışında silinir.
+
+### Düzeltildi
+- **Yeniden bağlanan öğrenci "ağda görünüyor, bağlı değil" kalıyordu.**
+  Öğrenci kısa bir kopmadan sonra yeniden bağlandığında, eski bağlantı
+  kapanırken yenisinin kaydını da siliyordu. Öğrenci bağlıydı ve ekran
+  gönderiyordu, konsol ise bağlı değil gösteriyordu.
+- Öğrenci, kapanmış bir öğretmen konsoluna bağlanmaya çalışıp duruyordu;
+  artık yalnızca duyurusu süren konsollara başvurur.
+- **Eşleştirme kodu girmeden bağlanan öğrencide** bağlantı kopunca ekran
+  kilidi, klavye izleme ve USB kısıtlaması kalkmıyordu.
+- "Ekranları Göster" yayın sürerken ikinci bir ekran yakalama başlatıyordu;
+  bazı bilgisayarlarda "Parametre hatalı (0x80070057)" hatası veriyordu.
+- Yetkisi kaldırılan öğrenci kayıtlı eşleştirmesini bırakmıyor ve sonsuza
+  kadar yeniden deniyordu; her denemesi denetim kaydına yazılıyordu.
+- Dosya gezgini başka bir öğrencide açıkken toplanan dosyalar kayboluyordu.
+- Kontrol edilen öğrenci düştüğünde konsol "Kontrol sizde" göstermeye devam
+  ediyordu.
+- Konsol, gelen her ekran karesinde bütün arayüzü yeniden çiziyordu; artık
+  yalnızca ilgili ekran çizilir.
+
 ## [0.5.2] — 2026-11-26
 
 ### Eklendi

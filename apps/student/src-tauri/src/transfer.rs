@@ -10,8 +10,9 @@
 //!
 //! Öğretmen hedefi seçebilir ama **serbest yol gönderemez**: taşınan değer
 //! [`FileDestination`] (Belgeler · Masaüstü · İndirilenler) ve her biri
-//! öğrencinin kendi klasörüne çözülüp altına `OpenClass` eklenir. Serbest
-//! metin bir yol alanı sistem dizinlerine yazma kapısı açardı.
+//! öğrencinin kendi klasörüne çözülür; dosya doğrudan oraya ya da öğretmenin
+//! adını verdiği alt klasöre yazılır. Serbest metin bir yol alanı sistem
+//! dizinlerine yazma kapısı açardı.
 //!
 //! Gelen ad [`sanitize_name`] ile temizlenir; yol bileşeni, sürücü harfi ve
 //! `..` kabul edilmez.
@@ -46,11 +47,10 @@ pub const DISK_HEADROOM: u64 = 256 * 1024 * 1024;
 /// Gelen dosyaların yazıldığı klasör.
 ///
 /// Öğretmenin seçtiği kökün (`Belgeler` · `Masaüstü` · `İndirilenler`)
-/// altındaki `OpenClass` klasörüdür. Uygulamanın gizli veri dizini
-/// kullanılmaz: öğrenci gelen dosyayı kendi başına bulabilmeli.
-///
-/// Alt klasör her zaman eklenir. Dosyayı doğrudan Masaüstü'ne bırakmak
-/// öğrencinin kendi alanını dağıtmak olur.
+/// kendisidir; öğretmen bir alt klasör adı verdiyse kökün altındaki o
+/// klasör. Araya `OpenClass` gibi bir klasör **eklenmez**: öğrenci dosyayı
+/// öğretmenin söylediği yerde, aramadan bulmalı. Var olan dosyanın üzerine
+/// yazılmaz (bkz. [`unique_path`]).
 ///
 /// Seçilen kök okunamazsa Belgeler'e, o da yoksa veri dizinine düşülür;
 /// böylece aktarım hiçbir koşulda yalnızca klasör yüzünden başarısız olmaz.
@@ -79,9 +79,8 @@ pub fn inbox_dir(destination: FileDestination, subpath: Option<&str>) -> Result<
     let base = match subpath {
         // Öğretmen gezginde bir klasör seçmiş: kökün altında o klasör.
         Some(rel) => kok.join(safe_subpath(rel)?),
-        // Seçim yok: kökün altındaki OpenClass. Öğrencinin Masaüstü'ne
-        // doğrudan dosya saçmamak için alt klasör her zaman eklenir.
-        None => kok.join("OpenClass"),
+        // Seçim yok: dosya doğrudan köke yazılır.
+        None => kok.clone(),
     };
 
     // Son savunma: sonuç gerçekten kökün altında mı? `safe_subpath` zaten

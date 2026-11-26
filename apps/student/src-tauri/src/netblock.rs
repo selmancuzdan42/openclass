@@ -90,6 +90,55 @@ fn server_lock() -> &'static Mutex<Option<WarningServer>> {
     SERVER.get_or_init(|| Mutex::new(None))
 }
 
+/// Engeli bu süreç mi uyguladı?
+///
+/// Bağlantı her koptuğunda `netsh` ile durum sorgulamak zayıf makinede
+/// pahalıdır; engel bu oturumda uygulanmadıysa hiçbir komut çalıştırılmaz.
+#[cfg(windows)]
+static APPLIED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Bu oturumda uygulanan internet engelini kaldırır; kaldırdıysa `true`.
+///
+/// Engel oturuma bağlıdır: öğretmen bağlantısı kopunca bilgisayar internetsiz
+/// kalmaz. Güvenlik duvarı ve `hosts` değişiklikleri kalıcı olduğu için bu
+/// yapılmazsa engel yeniden başlatmadan sonra bile sürerdi.
+pub fn release_on_disconnect() -> bool {
+    #[cfg(windows)]
+    {
+        if !APPLIED.load(std::sync::atomic::Ordering::Relaxed) {
+            return false;
+        }
+        match set_internet_blocked(false) {
+            Ok(_) => true,
+            Err(err) => {
+                tracing::error!(hata = %err, "internet engeli kaldırılamadı");
+                false
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// Önceki çalışmadan kalmış internet engelini kaldırır; kaldırdıysa `true`.
+///
+/// Ajan çökmüş ya da bilgisayar engel açıkken kapanmış olabilir. Açılışta
+/// bir kez çağrılır.
+pub fn release_leftover() -> bool {
+    if !is_internet_blocked().unwrap_or(false) {
+        return false;
+    }
+    match set_internet_blocked(false) {
+        Ok(_) => true,
+        Err(err) => {
+            tracing::error!(hata = %err, "kalan internet engeli kaldırılamadı");
+            false
+        }
+    }
+}
+
 /// İnternet erişimini keser (`block=true`) veya geri açar (`block=false`).
 ///
 /// Güvenlik duvarı + hosts yönlendirmesi + yerel uyarı sayfası bir arada
@@ -100,11 +149,15 @@ pub fn set_internet_blocked(block: bool) -> Result<bool, String> {
     #[cfg(windows)]
     {
         if block {
+            // Yarıda kalsa bile kopmada geri alınabilsin diye önce işaretlenir.
+            APPLIED.store(true, std::sync::atomic::Ordering::Relaxed);
             block_internet_windows()?;
             block_web_via_hosts(true)
         } else {
             unblock_internet_windows()?;
-            block_web_via_hosts(false)
+            let result = block_web_via_hosts(false);
+            APPLIED.store(false, std::sync::atomic::Ordering::Relaxed);
+            result
         }
     }
     #[cfg(not(windows))]

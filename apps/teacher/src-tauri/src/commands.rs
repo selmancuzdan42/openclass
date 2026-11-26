@@ -417,6 +417,8 @@ pub async fn clear_help_request(
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerInfo {
+    /// Konsolun sürümü; güncelleme denetiminde karşılaştırılır.
+    pub app_version: String,
     pub teacher_id: String,
     pub teacher_name: String,
     pub class_name: String,
@@ -451,6 +453,7 @@ pub fn get_server_info(state: State<'_, Arc<AppState>>) -> CmdResult<ServerInfo>
         .clone();
     let cfg = state.config.read();
     Ok(ServerInfo {
+        app_version: openclass_common::APP_VERSION.to_string(),
         teacher_id: state.teacher_id.to_string(),
         teacher_name: cfg.teacher_name.clone(),
         class_name: cfg.class_name.clone(),
@@ -1197,22 +1200,24 @@ pub async fn stop_key_monitor(state: State<'_, Arc<AppState>>, device_id: String
 
 // -------------------------------------------------------- dosya gönderme
 
-/// Seçili öğrencilere dosya gönderir.
+/// Seçili öğrencilere bir ya da birden çok dosya gönderir.
 ///
-/// Dosya TLS kanalından parçalı gönderilir ve alıcı SHA-256 özetiyle
-/// doğrular. Öğrenciye her zaman bildirilir — sessiz bırakma yoktur.
+/// Dosyalar TLS kanalından parçalı, sırayla gönderilir ve alıcı her birini
+/// SHA-256 özetiyle doğrular. Öğrenciye her zaman bildirilir — sessiz
+/// bırakma yoktur. Dönen değer kuyruğa alınan dosya sayısıdır.
 ///
-/// Öğretmen hedef **kökü** seçebilir (`documents` · `desktop` · `downloads`)
-/// ama serbest yol gönderemez; dosya her zaman o kökün altındaki `OpenClass`
-/// klasörüne yazılır. Tanınmayan bir değer gelirse Belgeler kullanılır.
+/// Öğretmen hedef **kökü** seçer (`documents` · `desktop` · `downloads`) ve
+/// isterse altında bir klasör adı verir; serbest yol gönderemez. Klasör
+/// verilmezse dosya doğrudan köke yazılır. Tanınmayan kök değeri Masaüstü
+/// sayılır.
 #[tauri::command]
-pub fn send_file(
+pub fn send_files(
     state: State<'_, Arc<AppState>>,
     device_ids: Vec<String>,
-    path: String,
+    paths: Vec<String>,
     destination: Option<String>,
     subpath: Option<String>,
-) -> CmdResult<String> {
+) -> CmdResult<usize> {
     if device_ids.is_empty() {
         return Err("Dosya gönderilecek cihaz seçilmedi.".into());
     }
@@ -1223,16 +1228,19 @@ pub fn send_file(
         .collect::<Result<_, _>>()?;
 
     // Arayüzden gelen metin kapalı bir kümeye çözülür; bilinmeyen değer
-    // hataya değil varsayılana düşer, böylece eski arayüz de çalışır.
+    // hataya değil varsayılana düşer.
     let destination = match destination.as_deref() {
-        Some("desktop") => FileDestination::Desktop,
+        Some("documents") => FileDestination::Documents,
         Some("downloads") => FileDestination::Downloads,
-        _ => FileDestination::Documents,
+        _ => FileDestination::Desktop,
     };
+    let subpath = subpath
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
 
-    let (transfer_id, name, size) = crate::transfer::send(
+    let count = crate::transfer::send_many(
         Arc::clone(&state),
-        path.into(),
+        paths.into_iter().map(Into::into).collect(),
         targets,
         destination,
         subpath,
@@ -1240,10 +1248,11 @@ pub fn send_file(
     .map_err(|e| format!("{e}"))?;
 
     tracing::info!(
-        %transfer_id, %name, size, hedef = destination.label(),
+        adet = count,
+        hedef = destination.label(),
         "dosya gönderimi kuyruğa alındı"
     );
-    Ok(transfer_id.to_string())
+    Ok(count)
 }
 
 /// Yürüyen ve biten gönderimlerin listesi.
@@ -1413,6 +1422,7 @@ pub async fn browse_fetch(
         _ => None,
     };
 
+    let request_id = Uuid::new_v4();
     let device_id = {
         let mut guard = state.browse.write();
         let Some(session) = guard.as_mut() else {
@@ -1422,6 +1432,7 @@ pub async fn browse_fetch(
             return Err("Başka bir indirme sürüyor.".into());
         }
         session.target_dir = target;
+        session.pending_fetch = Some(request_id);
         session.device_id
     };
 
@@ -1429,12 +1440,9 @@ pub async fn browse_fetch(
         return Err("Cihaz bağlı değil.".into());
     };
 
-    tx.send(ServerMessage::BrowseFetch {
-        request_id: Uuid::new_v4(),
-        path,
-    })
-    .await
-    .map_err(|_| "Cihazla bağlantı kapandı.".to_string())?;
+    tx.send(ServerMessage::BrowseFetch { request_id, path })
+        .await
+        .map_err(|_| "Cihazla bağlantı kapandı.".to_string())?;
     Ok(())
 }
 
@@ -1548,30 +1556,48 @@ pub async fn collect_files(
     };
 
     let mut sent = 0u32;
+    let mut targets = Vec::with_capacity(device_ids.len());
     for raw in device_ids {
         let id = parse_id(&raw)?;
-        let Some(tx) = state.registry.sender(id) else {
-            continue;
+        let hostname = state.registry.hostname(id).unwrap_or_else(|| raw.clone());
+        let delivered = match state.registry.sender(id) {
+            Some(tx) => tx
+                .send(ServerMessage::CollectRequest {
+                    pattern: pattern.to_string(),
+                    destination,
+                    delete_source,
+                })
+                .await
+                .is_ok(),
+            None => false,
         };
-        if tx
-            .send(ServerMessage::CollectRequest {
-                pattern: pattern.to_string(),
-                destination,
-                delete_source,
-            })
-            .await
-            .is_ok()
-        {
+        if delivered {
             state
                 .db
                 .audit(AuditKind::FileCollectionRequested, Some(id), None);
             sent += 1;
         }
+        targets.push((id, hostname, delivered));
     }
 
     if sent == 0 {
         return Err("Dosya toplanacak bağlı cihaz yok.".into());
     }
+
+    // Sonuçlar arayüzde tek tabloda izlenir (bkz. `crate::collect`).
+    let kok = state.download_root.read().clone();
+    let dir = crate::browse::downloads_dir(kok.as_deref())
+        .map(|d| d.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    crate::collect::start(
+        &state,
+        pattern.to_string(),
+        destination.label().to_string(),
+        dir,
+        delete_source,
+        targets,
+    );
+
     tracing::info!(
         adet = sent,
         desen = %pattern,
@@ -1582,12 +1608,21 @@ pub async fn collect_files(
     Ok(sent)
 }
 
+/// Son dosya toplama işleminin durumu; hiç toplama yapılmadıysa `None`.
+#[tauri::command]
+pub fn get_collection(
+    state: State<'_, Arc<AppState>>,
+) -> CmdResult<Option<crate::collect::Collection>> {
+    Ok(state.collection.read().clone())
+}
+
 // ------------------------------------------------------- uzaktan kapatma
 
 /// Seçili öğrencinin bilgisayarını kapatır.
 ///
-/// Geri dönüşü olmayan bir komut olduğu için arayüz onayı alır ve tek cihaza
-/// uygulanır; öğrenciye kapatmadan önce kısa bir bildirim gösterilir.
+/// Geri dönüşü olmayan bir komut olduğu için arayüz önce onay alır; toplu
+/// kapatmada komut her cihaz için ayrı çağrılır. Öğrenciye kapatmadan önce
+/// kısa bir bildirim gösterilir.
 #[tauri::command]
 pub async fn shutdown_device(state: State<'_, Arc<AppState>>, device_id: String) -> CmdResult<()> {
     let id = parse_id(&device_id)?;
@@ -1608,7 +1643,7 @@ const OLD_AGENT: &str =
 
 /// Seçili öğrencinin bilgisayarını yeniden başlatır.
 ///
-/// Kapatma ile aynı kurallar: arayüz onay alır, tek cihaza uygulanır ve
+/// Kapatma ile aynı kurallar: arayüz onay alır, toplu işlemde her cihaz için ayrı çağrılır ve
 /// öğrenciye önce kısa bir bildirim gösterilir.
 #[tauri::command]
 pub async fn restart_device(state: State<'_, Arc<AppState>>, device_id: String) -> CmdResult<()> {
@@ -1812,4 +1847,22 @@ pub fn open_screenshots_dir(app: tauri::AppHandle) -> CmdResult<()> {
     app.opener()
         .open_path(dir.to_string_lossy().to_string(), None::<&str>)
         .map_err(|e| format!("Klasör açılamadı: {e}"))
+}
+
+// ------------------------------------------------------------ güncelleme
+
+/// Yeni sürümlerin yayımlandığı sayfa.
+const RELEASES_URL: &str = "https://github.com/selmancuzdan42/openclass/releases/latest";
+
+/// Sürüm sayfasını tarayıcıda açar.
+///
+/// Adres sabittir; arayüzden gelen bir adres açılmaz. Program kendini
+/// güncellemez: yeni sürümü indirip kurmak öğretmenin kararıdır.
+#[tauri::command]
+pub fn open_release_page(app: tauri::AppHandle) -> CmdResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+
+    app.opener()
+        .open_url(RELEASES_URL, None::<&str>)
+        .map_err(|e| format!("Sayfa açılamadı: {e}"))
 }

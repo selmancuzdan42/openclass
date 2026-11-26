@@ -7,6 +7,7 @@
 
 mod broadcast;
 mod browse;
+mod collect;
 mod commands;
 mod config;
 mod db;
@@ -101,7 +102,7 @@ pub fn run() {
             commands::send_remote_input,
             commands::lock_devices,
             commands::unlock_devices,
-            commands::send_file,
+            commands::send_files,
             commands::get_transfers,
             commands::clear_finished_transfers,
             commands::open_browser,
@@ -113,6 +114,8 @@ pub fn run() {
             commands::get_download_root,
             commands::set_download_root,
             commands::collect_files,
+            commands::get_collection,
+            commands::open_release_page,
             commands::shutdown_device,
             commands::restart_device,
             commands::block_usb,
@@ -163,7 +166,13 @@ fn bootstrap() -> Result<Arc<AppState>> {
     let secrets_dir = paths::secrets_dir(App::Teacher)?;
     let db_path = paths::database_file(App::Teacher)?;
 
-    let config = TeacherConfig::load_or_create(&config_path)?;
+    let mut config = TeacherConfig::load_or_create(&config_path)?;
+    if let Some(prefix) = config.adopt_hostname_prefix(&openclass_common::machine::hostname()) {
+        tracing::info!(%prefix, "sınıf bilgisayar adından alındı");
+        if let Err(err) = config.save(&config_path) {
+            tracing::warn!(error = %format!("{err:#}"), "yapılandırma kaydedilemedi");
+        }
+    }
     let teacher_id = config.teacher_id;
     let tls = TlsIdentity::load_or_create(&secrets_dir).context("TLS kimliği hazırlanamadı")?;
     let db = Db::open(&db_path)?;
@@ -189,6 +198,7 @@ fn bootstrap() -> Result<Arc<AppState>> {
         broadcast_fallback: RwLock::new(std::collections::HashSet::new()),
         browse: RwLock::new(None),
         active_downloads: RwLock::new(HashMap::new()),
+        collection: RwLock::new(None),
         download_root: RwLock::new(None),
         controlled_device: RwLock::new(None),
         broadcast: RwLock::new(None),

@@ -42,6 +42,8 @@ export interface PairingInfo {
 }
 
 export interface ServerInfo {
+  /** Konsolun sürümü (`0.6.0`). */
+  appVersion: string;
   teacherId: string;
   teacherName: string;
   className: string;
@@ -196,4 +198,36 @@ export interface BrowseView {
   loading: boolean;
   error: string | null;
   download: BrowseDownload | null;
+}
+
+/** Bir bilgisayarın dosya toplamadaki durumu. */
+export interface CollectTarget {
+  deviceId: string;
+  hostname: string;
+  state: "waiting" | "receiving" | "done" | "no_reply" | "offline";
+  /** Öğretmene ulaşan ve doğrulanan dosya sayısı. */
+  files: number;
+  /** Öğrencide desene uyan dosya sayısı; özet gelmediyse `null`. */
+  matched: number | null;
+  errors: string[];
+}
+
+/** Son dosya toplama işlemi. */
+export interface CollectionView {
+  id: string;
+  pattern: string;
+  /** Öğrencide bakılan klasör ("Masaüstü"…). */
+  root: string;
+  /** Dosyaların öğretmen bilgisayarında kaydedildiği klasör. */
+  dir: string;
+  deleteSource: boolean;
+  startedAt: number;
+  targets: CollectTarget[];
+}
+
+/** GitHub'da yayımlanmış, kurulu olandan yeni sürüm. */
+export interface UpdateInfo {
+  version: string;
+  /** Sürüm notları (düz metin). */
+  notes: string;
 }

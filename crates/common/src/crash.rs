@@ -76,6 +76,53 @@ pub fn pending(app: App) -> Vec<(PathBuf, CrashReport)> {
         .unwrap_or_default()
 }
 
+/// Başka bir bilgisayardan (öğrenci ajanından) gelen çökme kaydını saklar.
+///
+/// Öğretmen konsolu bunları kendi kayıtlarıyla aynı klasörde tutar ve
+/// öğretmene birlikte sorar. Karşı taraftan gelen metne güvenilmez: alanlar
+/// yeniden maskelenir ve uzunlukları sınırlanır.
+pub fn store_received(
+    app: App,
+    source: &str,
+    version: &str,
+    os: &str,
+    message: &str,
+    location: &str,
+    at: u64,
+) -> anyhow::Result<()> {
+    let short = |text: &str| sanitize(text).chars().take(64).collect::<String>();
+    let report = CrashReport {
+        app: short(source),
+        version: short(version),
+        os: short(os),
+        message: sanitize(message),
+        location: sanitize(location),
+        at,
+    };
+    store_in(&reports_dir(app)?, &report)
+}
+
+fn store_in(dir: &Path, report: &CrashReport) -> anyhow::Result<()> {
+    let at = report.at;
+    // Aynı kayıt (öğrenci onay gelmeden yeniden gönderdiyse) ikinci kez yazılmaz.
+    if read_all(dir).iter().any(|(_, r)| r == report) {
+        return Ok(());
+    }
+    let text = serde_json::to_string(report)?;
+    // Farklı bilgisayarlar aynı saniyede çökmüş olabilir; ad çakışmasın.
+    let name = (0..)
+        .map(|n| dir.join(format!("crash-{at}-{n}.json")))
+        .find(|p| !p.exists())
+        .expect("sayaç tükenmez");
+    std::fs::write(name, text)?;
+    let mut all = read_all(dir);
+    while all.len() > MAX_REPORTS {
+        let (old, _) = all.remove(0);
+        let _ = std::fs::remove_file(old);
+    }
+    Ok(())
+}
+
 fn build(app: App, message: &str, location: &str) -> CrashReport {
     CrashReport {
         app: match app {
@@ -208,6 +255,27 @@ fn mask_user_dirs(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gelen_kayit_saklanir_ve_ayni_kayit_ikinci_kez_yazilmaz() {
+        let dir = tempfile::tempdir().unwrap();
+        let kayit = |mesaj: &str| CrashReport {
+            app: "student".into(),
+            version: "0.5.3".into(),
+            os: "windows x86_64".into(),
+            message: mesaj.into(),
+            location: "src/net/client.rs:10".into(),
+            at: 1_700_000_000,
+        };
+        store_in(dir.path(), &kayit("bir")).unwrap();
+        // Onay gelmeden yeniden gönderilen aynı kayıt.
+        store_in(dir.path(), &kayit("bir")).unwrap();
+        // Aynı saniyede başka bir bilgisayarın çökmesi ayrı dosyaya yazılır.
+        store_in(dir.path(), &kayit("iki")).unwrap();
+
+        let hepsi = read_all(dir.path());
+        assert_eq!(hepsi.len(), 2);
+    }
 
     #[test]
     fn ip_adresleri_maskelenir() {

@@ -89,6 +89,15 @@ pub fn run() {
         }
     }
 
+    // İnternet engeli de oturuma bağlıdır ve güvenlik duvarında kalıcıdır;
+    // önceki çalışmadan kaldıysa kaldırılır. `netsh` yavaş olabildiği için
+    // açılışı bekletmemek üzere ayrı iş parçacığında yapılır.
+    std::thread::spawn(|| {
+        if netblock::release_leftover() {
+            tracing::warn!("önceki oturumdan kalan internet engeli kaldırıldı");
+        }
+    });
+
     // İlk çalıştırmada otomatik başlatmayı kendiliğinden aç: laboratuvar
     // bilgisayarında ajanın her açılışta çalışması beklenen davranıştır ve
     // yirmi makinede tek tek işaretlenmesi gerekmemeli. Yalnızca bir kez
@@ -167,14 +176,16 @@ pub fn run() {
                     }
                 }
 
-                // Henüz eşleştirilmemiş cihazda yapılandırma penceresi açılır;
-                // eşleştirilmişse ajan sessizce tepside çalışır.
+                // Henüz hiçbir konsola bağlanmamış cihazda yapılandırma
+                // penceresi açılır; kurulumu bitmiş ajan sessizce tepside çalışır.
                 //
                 // Test modunda ajan kendiliğinden eşleşeceği için pencere
                 // açılmaz; aksi hâlde yük testinde onlarca pencere açılırdı.
-                if state.config.read().paired_teacher.is_none()
-                    && testing::autopair_code().is_none()
-                {
+                let kurulu = {
+                    let cfg = state.config.read();
+                    cfg.paired_teacher.is_some() || cfg.ever_connected
+                };
+                if !kurulu && testing::autopair_code().is_none() {
                     tray::show_config_window(&handle);
                 }
 
