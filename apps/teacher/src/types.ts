@@ -66,6 +66,18 @@ export interface ServerInfo {
   networkError: string | null;
 }
 
+/** Bir çökmenin kaydı. Yalnızca nedeni taşır; bilgisayar adı, IP ya da log içermez. */
+export interface CrashReport {
+  /** `teacher` ya da `student`. */
+  app: string;
+  version: string;
+  os: string;
+  message: string;
+  location: string;
+  /** Çökme anı (Unix saniye). */
+  at: number;
+}
+
 export interface AuditEntry {
   at: number;
   kind: string;

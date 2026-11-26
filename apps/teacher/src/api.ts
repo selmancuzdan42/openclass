@@ -7,6 +7,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type {
+  CrashReport,
   AuditEntry,
   BroadcastInfo,
   DeviceGroup,
@@ -128,8 +129,40 @@ export const api = {
   saveScreenshot: (deviceId: string, hostname: string, stamp: string, png: number[]) =>
     call<string>("save_screenshot", { deviceId, hostname, stamp, png }),
   openScreenshotsDir: () => call<void>("open_screenshots_dir"),
+  getCrashReports: () => call<CrashReport[]>("get_crash_reports"),
+  clearCrashReports: () => call<void>("clear_crash_reports"),
   getBroadcast: () => call<BroadcastInfo | null>("get_broadcast"),
 };
+
+/** Hata raporlarının gönderildiği Google Formu ve alan kimlikleri. */
+const CRASH_FORM =
+  "https://docs.google.com/forms/d/e/1FAIpQLSdqyvw5wbnXxoVRntr1lOZjDdb4GrQKgQvxYoUYYqiRWu_MDQ/formResponse";
+const CRASH_FIELDS = {
+  app: "entry.385931088",
+  version: "entry.1231105771",
+  os: "entry.221690634",
+  message: "entry.1997693040",
+  location: "entry.1559326142",
+  at: "entry.1842019925",
+};
+
+/**
+ * Bir çökme kaydını gönderir. Yalnızca öğretmen onay verdikten sonra çağrılır.
+ *
+ * Form başka bir kökende olduğu için yanıt okunamaz (`no-cors`); ağ hatası
+ * dışında başarılı sayılır.
+ */
+export async function sendCrashReport(report: CrashReport): Promise<void> {
+  const body = new URLSearchParams({
+    [CRASH_FIELDS.app]: report.app,
+    [CRASH_FIELDS.version]: report.version,
+    [CRASH_FIELDS.os]: report.os,
+    [CRASH_FIELDS.message]: report.message,
+    [CRASH_FIELDS.location]: report.location,
+    [CRASH_FIELDS.at]: new Date(report.at * 1000).toISOString(),
+  });
+  await fetch(CRASH_FORM, { method: "POST", mode: "no-cors", body });
+}
 
 /** Denetim kaydı türlerinin Türkçe karşılıkları. */
 export const AUDIT_LABELS: Record<string, string> = {

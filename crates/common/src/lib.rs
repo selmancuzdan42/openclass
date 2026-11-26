@@ -3,6 +3,7 @@
 //! Burada iş mantığı yoktur; yalnızca iki uygulamanın da ihtiyaç duyduğu
 //! platform yardımcıları bulunur.
 
+pub mod crash;
 pub mod logging;
 pub mod machine;
 pub mod net;

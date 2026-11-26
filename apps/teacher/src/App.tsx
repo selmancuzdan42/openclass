@@ -53,6 +53,7 @@ import {
   FocusDialog,
   LockDialog,
   ClassPickerDialog,
+  CrashReportDialog,
   MessageDialog,
   PairingDialog,
   SettingsDialog,
@@ -78,6 +79,7 @@ import {
 } from "./ui";
 import { useTheme } from "./useTheme";
 import type {
+  CrashReport,
   AuditEntry,
   BroadcastInfo,
   DeviceGroup,
@@ -123,6 +125,9 @@ function Console() {
   // Sınıf seçim penceresi: açılışta bir kez, sonra durum çubuğundan açılır.
   const [classOpen, setClassOpen] = useState(false);
   const classAsked = useRef(false);
+  // Bağlantısı kopan bilgisayar adları; tek bildirimde toplanmak üzere bekler.
+  const dropped = useRef<string[]>([]);
+  const dropTimer = useRef<number | undefined>(undefined);
   const [frameBaseUrl, setFrameBaseUrl] = useState("");
   const [broadcast, setBroadcast] = useState<BroadcastInfo | null>(null);
   const [controlled, setControlled] = useState<string | null>(null);
@@ -131,6 +136,11 @@ function Console() {
   const [collectOpen, setCollectOpen] = useState(false);
   const [shutdownTarget, setShutdownTarget] = useState<DeviceView | null>(null);
   const [restartTarget, setRestartTarget] = useState<DeviceView | null>(null);
+  // Önceki çalışmadan kalan çökme kayıtları; öğretmene bir kez sorulur.
+  const [crashReports, setCrashReports] = useState<CrashReport[]>([]);
+  useEffect(() => {
+    void api.getCrashReports().then(setCrashReports).catch(() => {});
+  }, []);
   const [transfersOpen, setTransfersOpen] = useState(false);
   // Uzak dosya gezgini: "Dosya Al" yalnızca tek seçili öğrenciyle açılır.
   const [browseOpen, setBrowseOpen] = useState(false);
@@ -211,6 +221,25 @@ function Console() {
       listen<string | null>("control-changed", (e) => setControlled(e.payload)),
       listen("pairing-changed", () => void api.getPairing().then(setPairing).catch(() => {})),
       listen<string>("network-error", (e) => show("error", e.payload)),
+      // Bağlantısı kopan öğrenciler. Elektrik kesintisi gibi durumlarda
+      // hepsi birden düşer; kısa süre içinde gelenler tek bildirimde toplanır.
+      listen<string>("device-disconnected", (e) => {
+        dropped.current.push(e.payload);
+        window.clearTimeout(dropTimer.current);
+        dropTimer.current = window.setTimeout(() => {
+          const names = [...new Set(dropped.current)];
+          dropped.current = [];
+          if (names.length === 0) return;
+          const shown = names.slice(0, 3).join(", ");
+          const rest = names.length - 3;
+          show(
+            "error",
+            names.length === 1
+              ? `${shown} bağlantısı koptu.`
+              : `${shown}${rest > 0 ? ` ve ${rest} bilgisayar daha` : ""}: bağlantı koptu.`,
+          );
+        }, 1200);
+      }),
       // Öğrenci bir kısıtlamayı uygulayamadığında nedeni bildirir.
       listen<string>("device-warning", (e) => show("error", e.payload)),
       listen<HelpEvent>("help-request", (e) => {
@@ -1392,6 +1421,8 @@ function Console() {
           );
         }}
       />
+
+      <CrashReportDialog reports={crashReports} onDone={() => setCrashReports([])} />
 
       <FocusDialog
         device={focusedDevice}

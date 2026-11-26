@@ -35,6 +35,13 @@ pub struct StudentConfig {
     /// öğretmen cihazları buna göre gruplayabilir. Yapı `#[serde(default)]`
     /// taşıdığı için alanı bilmeyen eski yapılandırma dosyaları bozulmaz.
     pub room: Option<String>,
+    /// Otomatik başlatma ilk kurulumda bir kez kendiliğinden açıldı mı?
+    ///
+    /// Ajan ilk çalıştığında Windows açılışında başlamak üzere kendini
+    /// kaydeder; kimseye sorulmaz. Bu bayrak, yöneticinin sonradan
+    /// yapılandırma penceresinden kapattığı ayarın her açılışta yeniden
+    /// açılmasını önler.
+    pub autostart_configured: bool,
 }
 
 impl StudentConfig {
@@ -110,6 +117,7 @@ mod tests {
             }),
             manual_teacher_address: None,
             room: Some("Lab 1".into()),
+            autostart_configured: false,
         };
         let json = serde_json::to_string(&cfg).unwrap();
         assert!(

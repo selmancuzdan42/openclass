@@ -66,6 +66,8 @@ pub fn run() {
             None
         }
     };
+    // Çökme nedeni kaydedilsin; kimlik bilgisi içermez (bkz. `openclass_common::crash`).
+    openclass_common::crash::install(App::Student);
 
     let state = match bootstrap() {
         Ok(state) => state,
@@ -84,6 +86,27 @@ pub fn run() {
     if let Ok(dir) = paths::data_dir(App::Student) {
         if devblock::release_all(&dir) {
             tracing::warn!("önceki oturumdan kalan USB kısıtlaması kaldırıldı");
+        }
+    }
+
+    // İlk çalıştırmada otomatik başlatmayı kendiliğinden aç: laboratuvar
+    // bilgisayarında ajanın her açılışta çalışması beklenen davranıştır ve
+    // yirmi makinede tek tek işaretlenmesi gerekmemeli. Yalnızca bir kez
+    // yapılır; sonradan elle kapatılırsa kapalı kalır.
+    if autostart::is_supported() && !state.config.read().autostart_configured {
+        match autostart::set_enabled(true) {
+            Ok(()) => {
+                state.config.write().autostart_configured = true;
+                if let Err(err) = state.save_config() {
+                    tracing::warn!(error = %format!("{err:#}"), "yapılandırma kaydedilemedi");
+                }
+                tracing::info!("otomatik başlatma ilk kurulumda açıldı");
+            }
+            // Yönetici yetkisi alınamadıysa başarısız olur; sonraki açılışta
+            // yeniden denenir.
+            Err(err) => {
+                tracing::warn!(error = %format!("{err:#}"), "otomatik başlatma açılamadı");
+            }
         }
     }
 

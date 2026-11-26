@@ -105,6 +105,20 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   block_usb: (args) => (args.deviceIds as string[]).length,
   save_screenshot: (args) => `/home/ogretmen/Resimler/OpenClass/${args.hostname}_${args.stamp}.png`,
   open_screenshots_dir: () => null,
+  get_crash_reports: () =>
+    new URLSearchParams(location.search).has("cokme")
+      ? [
+          {
+            app: "teacher",
+            version: "0.5.1",
+            os: "windows x86_64",
+            message: "called `Option::unwrap()` on a `None` value",
+            location: "apps/teacher/src-tauri/src/net/server.rs:812",
+            at: Math.floor(Date.now() / 1000) - 3600,
+          },
+        ]
+      : [],
+  clear_crash_reports: () => null,
   open_browser: () => {
     browseOpen = true;
     browsePath = "";

@@ -1687,6 +1687,33 @@ pub async fn block_usb(
     Ok(sent)
 }
 
+// ------------------------------------------------------- hata raporları
+
+/// Önceki çalışmalardan kalan, henüz sorulmamış çökme kayıtları.
+///
+/// Kayıtlar yalnızca çökmenin nedenini taşır (bkz. `openclass_common::crash`);
+/// arayüz bunları öğretmene gösterir ve **yalnızca onay verirse** gönderir.
+#[tauri::command]
+pub fn get_crash_reports() -> Vec<openclass_common::crash::CrashReport> {
+    openclass_common::crash::pending(openclass_common::paths::App::Teacher)
+        .into_iter()
+        .map(|(_, report)| report)
+        .collect()
+}
+
+/// Bekleyen çökme kayıtlarını siler.
+///
+/// Öğretmen göndermeyi kabul ettiğinde de reddettiğinde de çağrılır; aynı
+/// çökme için ikinci kez sorulmaz.
+#[tauri::command]
+pub fn clear_crash_reports() {
+    for (path, _) in openclass_common::crash::pending(openclass_common::paths::App::Teacher) {
+        if let Err(err) = std::fs::remove_file(&path) {
+            tracing::warn!(%err, "çökme kaydı silinemedi");
+        }
+    }
+}
+
 // ------------------------------------------------------ ekran görüntüsü
 
 /// Kaydedilebilecek en büyük ekran görüntüsü.

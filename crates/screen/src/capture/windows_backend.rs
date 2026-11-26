@@ -30,6 +30,10 @@ type FrameSlot = Arc<Mutex<Option<RawFrame>>>;
 /// gelmezse DXGI Desktop Duplication'a otomatik düşülür.
 const WGC_FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(3);
 
+/// DXGI çoğaltması ilk denemede kurulamazsa yapılacak ek deneme sayısı ve aralığı.
+const DXGI_START_RETRIES: u32 = 4;
+const DXGI_START_RETRY_DELAY: Duration = Duration::from_millis(300);
+
 pub struct Session {
     slot: FrameSlot,
     running: Arc<AtomicBool>,
@@ -103,9 +107,21 @@ impl Session {
         self.running.load(Ordering::Relaxed)
     }
 
-    pub fn stop(self) {
+    /// Yakalamayı durdurur. Asıl iş [`Drop`] içindedir.
+    pub fn stop(self) {}
+}
+
+impl Drop for Session {
+    /// Oturum nasıl bırakılırsa bırakılsın yakalama iş parçacığı durur.
+    ///
+    /// Bağlantı koptuğunda oturum `stop` çağrılmadan düşebiliyor. İş
+    /// parçacığı çalışmaya devam ederse DXGI çoğaltmasını elinde tutar ve
+    /// Windows aynı süreçten ikinci bir çoğaltmaya izin vermez: öğretmen
+    /// konsolu kapatılıp açıldığında yeni yakalama "Parametre hatalı
+    /// (0x80070057)" ile başlatılamaz.
+    fn drop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
-        if let Some(halt) = self.halt {
+        if let Some(halt) = &self.halt {
             halt.store(true, Ordering::Relaxed);
         }
     }
@@ -248,8 +264,22 @@ fn start_dxgi(slot: FrameSlot, running: Arc<AtomicBool>) -> Result<()> {
 
     // İlk oluşturmayı burada dene: başarısızsa çağırana hemen hata dönsün,
     // "başladı" denip sessizce ölen bir iş parçacığı kalmasın.
-    let mut duplication = DxgiDuplicationApi::new(monitor)
-        .map_err(|e| anyhow!("DXGI Desktop Duplication başlatılamadı: {e}"))?;
+    //
+    // Az önce durdurulan bir oturumun iş parçacığı çoğaltmayı bırakmak için
+    // bir tur daha dönebilir (en çok ~100 ms). O aralıkta Windows ikinci
+    // çoğaltmayı reddeder; kısa aralıklarla birkaç kez yeniden denenir.
+    let mut attempt = 0;
+    let mut duplication = loop {
+        match DxgiDuplicationApi::new(monitor) {
+            Ok(duplication) => break duplication,
+            Err(err) if attempt < DXGI_START_RETRIES => {
+                attempt += 1;
+                tracing::warn!(error = %err, deneme = attempt, "DXGI başlatılamadı, yeniden deneniyor");
+                std::thread::sleep(DXGI_START_RETRY_DELAY);
+            }
+            Err(err) => return Err(anyhow!("DXGI Desktop Duplication başlatılamadı: {err}")),
+        }
+    };
 
     std::thread::Builder::new()
         .name("openclass-dxgi-capture".into())

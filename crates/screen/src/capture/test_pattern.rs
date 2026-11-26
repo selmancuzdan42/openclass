@@ -118,7 +118,15 @@ impl Session {
         self.running.load(Ordering::Relaxed)
     }
 
-    pub fn stop(self) {
+    /// Yakalamayı durdurur. Asıl iş [`Drop`] içindedir.
+    pub fn stop(self) {}
+}
+
+impl Drop for Session {
+    /// Oturum `stop` çağrılmadan düşse de iş parçacığı durur (bağlantı
+    /// koptuğunda böyle olur); aksi hâlde her yeniden bağlanışta bir iş
+    /// parçacığı daha birikirdi.
+    fn drop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
     }
 }
@@ -441,6 +449,20 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Rgb {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oturum_birakilinca_is_parcacigi_durur() {
+        let session = Session::start("LAB101").unwrap();
+        let slot = Arc::clone(&session.slot);
+        // `stop` çağrılmadan bırakılır: bağlantı koptuğundaki durum.
+        drop(session);
+        // İş parçacığı yuvanın bir kopyasını tutar; sonlanınca bırakır.
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while Arc::strong_count(&slot) > 1 && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(Arc::strong_count(&slot), 1, "yakalama iş parçacığı durmadı");
+    }
 
     #[test]
     fn desen_dogru_boyutta_kare_uretir() {

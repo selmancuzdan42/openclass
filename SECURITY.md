@@ -42,6 +42,7 @@ OpenClass'ın **savunmadığı** senaryolar:
 | Eşleştirme kötüye kullanımı | Tek kullanımlık kod, 5 dakika ömür, 5 hatalı deneme sınırı |
 | Bellek tüketimi | Çerçeve boyutu sınırı (8 MiB), cihaz başına tek kare, dolu kuyrukta kare düşürme |
 | Veri sızıntısı | Ekran görüntüleri kendiliğinden diske yazılmaz (yalnızca öğretmenin açık "Ekran görüntüsü al" komutuyla, denetim kaydıyla); loglara anahtar/parola/kod yazılmaz |
+| Hata raporu | Çökme nedeni yalnızca öğretmenin onayıyla gönderilir (Google Forms); bilgisayar adı, kullanıcı adı, IP adresi ve cihaz kimliği maskelenir ya da hiç toplanmaz |
 | Gizli izleme | Tepsi simgesi her zaman görünür ve paylaşım sırasında değişir; simgeyi gizleyen bir seçenek yoktur |
 
 ## Bilinen sınırlamalar

@@ -333,6 +333,11 @@ async fn handle_connection(
         }
     }
     state.registry.detach(device_id);
+    // Öğretmen bir bilgisayarın düştüğünü fark etsin. Konsolun kendisi
+    // kapanırken bildirim gösterilmez.
+    if !state.cancel.is_cancelled() {
+        state.emit("device-disconnected", hostname.clone());
+    }
     state.db.audit(
         AuditKind::DeviceDisconnected,
         Some(device_id),

@@ -5,7 +5,7 @@ laboratuvarları için tasarlanmış sınıf yönetim yazılımı: öğretmen ye
 öğrenci bilgisayarlarını bulur, güvenli biçimde eşleştirir ve ders
 boyunca ekranlarını canlı izler.
 
-> **Durum:** v0.5.1 yayında. Aşağıdaki "Mevcut durum" bölümü neyin
+> **Durum:** v0.5.2 yayında. Aşağıdaki "Mevcut durum" bölümü neyin
 > çalıştığını açıkça listeler.
 
 ## Neden?
@@ -190,6 +190,10 @@ Açık bildirimi için [`SECURITY.md`](SECURITY.md). Özet:
   gösterge durur; kilidin zaman aşımı vardır ve Ctrl+Alt+Del engellenmez.
 - Uzak dosya gezgini **yalnızca listeler ve indirir** — yazma ve silme
   protokolde tanımlı değildir; kapsam öğrenci tarafında kısıtlanır.
+- Uygulama çökerse nedeni kaydedilir ve öğretmene **sorulur**; yalnızca onay
+  verirse geliştiricilere gönderilir. Rapor hata mesajı, koddaki yeri, sürüm
+  ve işletim sistemini taşır; bilgisayar adı, IP adresi ve ekran içeriği
+  içermez.
 - Gizli erişim, keylogger, parola toplama veya güvenlik yazılımı atlatma
   mekanizması **yoktur ve eklenmeyecektir**.
 

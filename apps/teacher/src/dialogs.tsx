@@ -1,7 +1,7 @@
 /** Komut şeridinden açılan iletişim kutuları. */
 import { useEffect, useMemo, useState } from "react";
 
-import { api, AUDIT_LABELS, formatTime } from "./api";
+import { api, AUDIT_LABELS, formatTime, sendCrashReport } from "./api";
 import { ScreenCanvas } from "@openclass/screen-view";
 import {
   Lock,
@@ -24,6 +24,7 @@ import { RemoteControlSurface } from "./RemoteControlSurface";
 import { Button, Empty, Field, Modal, TextInput, useToast } from "./ui";
 import type {
   AuditEntry,
+  CrashReport,
   DeviceGroup,
   DeviceView,
   FileDestination,
@@ -1190,6 +1191,96 @@ export function ShutdownDialog({
             ? "Kaydedilmemiş çalışma kaybolabilir. Bilgisayar açıldığında öğrenci ajanı kendiliğinden yeniden bağlanır."
             : "Kaydedilmemiş çalışma kaybolabilir. Makineyi yeniden açmak için öğrencinin fişle açması veya birinden yardım istemesi gerekir."}
         </p>
+      </div>
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------- hata raporu
+
+/**
+ * Önceki çalışmada uygulama çöktüyse, raporun gönderilmesi için onay ister.
+ *
+ * Hiçbir şey kendiliğinden gönderilmez. Gidecek metnin tamamı pencerede
+ * görünür; öğretmen "Gönderme" derse kayıt silinir ve bir daha sorulmaz.
+ */
+export function CrashReportDialog({
+  reports,
+  onDone,
+}: {
+  reports: CrashReport[];
+  onDone: () => void;
+}) {
+  const { show } = useToast();
+  const [busy, setBusy] = useState(false);
+
+  async function finish(send: boolean) {
+    setBusy(true);
+    let failed = false;
+    if (send) {
+      for (const report of reports) {
+        try {
+          await sendCrashReport(report);
+        } catch {
+          failed = true;
+        }
+      }
+    }
+    // Gönderim başarısızsa kayıt saklanır; bir sonraki açılışta yeniden sorulur.
+    if (!failed) await api.clearCrashReports().catch(() => {});
+    setBusy(false);
+    if (send) {
+      show(
+        failed ? "error" : "success",
+        failed
+          ? "Rapor gönderilemedi (internet bağlantısı yok olabilir). Sonraki açılışta yeniden sorulacak."
+          : "Hata raporu gönderildi. Teşekkürler.",
+      );
+    }
+    onDone();
+  }
+
+  return (
+    <Modal
+      open={reports.length > 0}
+      title="OpenClass beklenmedik şekilde kapandı"
+      onClose={() => void finish(false)}
+      footer={
+        <>
+          <Button disabled={busy} onClick={() => void finish(false)}>
+            Gönderme
+          </Button>
+          <Button tone="accent" disabled={busy} onClick={() => void finish(true)}>
+            {busy ? "Gönderiliyor…" : "Raporu Gönder"}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-2.5">
+        <p className="text-[12px] leading-relaxed text-[var(--color-text-2)]">
+          Sorunu düzeltebilmemiz için hata raporu geliştiricilere gönderilsin mi? Gönderilecek
+          bilginin tamamı aşağıdadır. Bilgisayar adı, kullanıcı adı, IP adresi ve ekran içeriği{" "}
+          <strong>gönderilmez</strong>.
+        </p>
+        {reports.map((r) => (
+          <dl
+            key={r.at}
+            data-selectable
+            className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded border
+              border-[var(--color-stroke)] bg-[var(--color-surface-2)] p-2.5 text-[11px]"
+          >
+            <dt className="text-[var(--color-text-3)]">Program</dt>
+            <dd>
+              {r.app === "teacher" ? "Öğretmen" : "Öğrenci"} {r.version} · {r.os}
+            </dd>
+            <dt className="text-[var(--color-text-3)]">Zaman</dt>
+            <dd>{formatTime(r.at)}</dd>
+            <dt className="text-[var(--color-text-3)]">Hata</dt>
+            <dd className="break-words font-mono">{r.message}</dd>
+            <dt className="text-[var(--color-text-3)]">Konum</dt>
+            <dd className="break-all font-mono">{r.location || "—"}</dd>
+          </dl>
+        ))}
       </div>
     </Modal>
   );

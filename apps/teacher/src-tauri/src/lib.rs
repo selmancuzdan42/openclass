@@ -47,6 +47,8 @@ pub fn run() {
             None
         }
     };
+    // Çökme nedeni kaydedilsin; kimlik bilgisi içermez (bkz. `openclass_common::crash`).
+    openclass_common::crash::install(App::Teacher);
 
     let state = match bootstrap() {
         Ok(state) => state,
@@ -117,6 +119,8 @@ pub fn run() {
             commands::show_student_screen,
             commands::save_screenshot,
             commands::open_screenshots_dir,
+            commands::get_crash_reports,
+            commands::clear_crash_reports,
             frame_base_url,
         ])
         .setup({

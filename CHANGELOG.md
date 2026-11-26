@@ -3,6 +3,26 @@
 Bu dosya [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/) biçimini,
 sürüm numaraları [Semantic Versioning](https://semver.org/lang/tr/) kurallarını izler.
 
+## [0.5.2] — 2026-11-26
+
+### Eklendi
+- **Onaylı hata raporu.** Uygulama çökerse nedeni kaydedilir; öğretmen
+  konsolu bir sonraki açılışta raporun gönderilmesini sorar ve gidecek
+  bilginin tamamını gösterir. Onay verilmezse hiçbir şey gönderilmez. Rapor
+  bilgisayar adı, IP adresi ya da ekran içeriği taşımaz.
+- **Bağlantı kopma bildirimi.** Bir öğrencinin bağlantısı kopunca öğretmen
+  konsolunda bildirim çıkar; aynı anda düşenler tek bildirimde toplanır.
+
+### Değiştirildi
+- Öğrenci ajanı ilk çalıştırmada otomatik başlatmayı kendiliğinden açar.
+  Sonradan elle kapatılırsa kapalı kalır.
+
+### Düzeltildi
+- Öğretmen konsolu kapatılıp açıldığında bazı öğrencilerde ekran yerine
+  "DXGI Desktop Duplication başlatılamadı: Parametre hatalı (0x80070057)"
+  çıkıyordu. Bağlantı kopunca ekran yakalama durdurulmuyordu ve Windows
+  ikinci yakalamayı reddediyordu.
+
 ## [0.5.1] — 2026-11-25
 
 ### Eklendi

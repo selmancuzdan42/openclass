@@ -332,9 +332,9 @@ function AutostartCard() {
             Windows açılışında ajanı başlat
           </span>
           <span className="block text-[11px] text-[var(--color-text-3)]">
-            Girdi, kayıt defterinin standart başlangıç anahtarına uygulamanın
-            kendi adıyla yazılır; gizlenmez. Yalnızca bu Windows kullanıcısı
-            için geçerlidir — makine geneli ayar kurulum paketiyle yapılır.
+            İlk kurulumda kendiliğinden açılır. Windows Görev Zamanlayıcı'ya
+            “OpenClass Student” adıyla kaydedilir; gizlenmez. Kapatırsanız
+            kapalı kalır.
           </span>
         </span>
       </label>
