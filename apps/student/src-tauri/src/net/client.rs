@@ -34,6 +34,10 @@ use crate::state::{AppState, ConnectTarget, ConnectionStatus, ReceivedNotice, Sh
 use openclass_screen::CaptureSession;
 use openclass_screen::TileEncoder;
 
+/// İnternet kesikken öğrenciye gösterilen uyarı.
+const INTERNET_BLOCKED_NOTICE: &str = "İnternet bağlantınız öğretmeniniz tarafından kesildi.\n\
+     Öğretmeniniz yeniden açana kadar internet siteleri açılmaz.";
+
 /// İlk yeniden deneme gecikmesi.
 const BACKOFF_MIN: Duration = Duration::from_secs(1);
 /// Azami yeniden deneme gecikmesi.
@@ -1087,6 +1091,23 @@ async fn handle_server_message(
             match crate::netblock::set_internet_blocked(block) {
                 Ok(blocked) => {
                     tracing::info!(blocked, "internet engelleme uygulandı");
+                    // Engel sessiz uygulanmaz: değişiklik öğrenciye bildirilir.
+                    state.show_notice(
+                        if blocked {
+                            INTERNET_BLOCKED_NOTICE
+                        } else {
+                            "Öğretmeniniz internet bağlantısını yeniden açtı."
+                        }
+                        .to_string(),
+                    );
+                    if blocked {
+                        // Öğrenci bir tarayıcı açtığında neden site
+                        // açılmadığını görsün (bkz. `netblock::watch_browsers`).
+                        let st = Arc::clone(state);
+                        crate::netblock::watch_browsers(move || {
+                            st.show_notice(INTERNET_BLOCKED_NOTICE.to_string());
+                        });
+                    }
                     let _ = tx
                         .send(ClientMessage::InternetBlockAck {
                             blocked,

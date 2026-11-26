@@ -23,6 +23,11 @@ gerektirir.
 - **Öğrenci hata raporları.** Öğrenci ajanının çökme kaydı öğretmen
   konsoluna iletilir ve öğretmenin onayıyla gönderilir. Kayıt hangi
   bilgisayardan geldiğini taşımaz.
+- **İnternet kesikken tarayıcı uyarısı.** Öğrenci herhangi bir tarayıcıyı
+  kullanmaya çalıştığında "İnternet bağlantınız öğretmeniniz tarafından
+  kesildi" uyarısı çıkar. Engel uygulanırken ve kaldırılırken de öğrenciye
+  bildirilir. Yalnızca öndeki programın adına bakılır; adres ya da içerik
+  okunmaz.
 - Sınıf, öğretmen bilgisayarının adından kendiliğinden önerilir ve kaydedilir
   (`BLAB1-OGR` → `BLAB1`). Açılıştaki sınıf sorusu sürer; öneri seçili gelir.
 

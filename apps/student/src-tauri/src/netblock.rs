@@ -48,21 +48,54 @@ const HOSTS_END: &str = "# OpenClass internet engeli — son";
 /// duvar zaten geri kalan her şeyi keser.
 #[cfg(windows)]
 const BLOCKED_HOSTS: &[&str] = &[
-    "google.com", "www.google.com", "google.com.tr", "www.google.com.tr",
-    "youtube.com", "www.youtube.com", "youtube-nocookie.com",
-    "yandex.com", "www.yandex.com", "yandex.com.tr", "www.yandex.com.tr",
-    "wikipedia.org", "www.wikipedia.org", "tr.wikipedia.org",
-    "instagram.com", "www.instagram.com",
-    "facebook.com", "www.facebook.com", "m.facebook.com",
-    "x.com", "www.x.com", "twitter.com", "www.twitter.com",
-    "gmail.com", "mail.google.com",
-    "outlook.com", "www.outlook.com", "hotmail.com",
-    "eba.gov.tr", "www.eba.gov.tr", "meb.gov.tr", "www.meb.gov.tr",
-    "eksisozluk.com", "www.eksisozluk.com",
-    "netflix.com", "www.netflix.com", "spotify.com",
-    "tiktok.com", "www.tiktok.com", "reddit.com", "www.reddit.com",
-    "linkedin.com", "www.linkedin.com", "whatsapp.com",
-    "twitch.tv", "www.twitch.tv", "github.com", "stackoverflow.com",
+    "google.com",
+    "www.google.com",
+    "google.com.tr",
+    "www.google.com.tr",
+    "youtube.com",
+    "www.youtube.com",
+    "youtube-nocookie.com",
+    "yandex.com",
+    "www.yandex.com",
+    "yandex.com.tr",
+    "www.yandex.com.tr",
+    "wikipedia.org",
+    "www.wikipedia.org",
+    "tr.wikipedia.org",
+    "instagram.com",
+    "www.instagram.com",
+    "facebook.com",
+    "www.facebook.com",
+    "m.facebook.com",
+    "x.com",
+    "www.x.com",
+    "twitter.com",
+    "www.twitter.com",
+    "gmail.com",
+    "mail.google.com",
+    "outlook.com",
+    "www.outlook.com",
+    "hotmail.com",
+    "eba.gov.tr",
+    "www.eba.gov.tr",
+    "meb.gov.tr",
+    "www.meb.gov.tr",
+    "eksisozluk.com",
+    "www.eksisozluk.com",
+    "netflix.com",
+    "www.netflix.com",
+    "spotify.com",
+    "tiktok.com",
+    "www.tiktok.com",
+    "reddit.com",
+    "www.reddit.com",
+    "linkedin.com",
+    "www.linkedin.com",
+    "whatsapp.com",
+    "twitch.tv",
+    "www.twitch.tv",
+    "github.com",
+    "stackoverflow.com",
 ];
 
 /// Uyarı sunucusunun bağlanacağı adres.
@@ -211,6 +244,157 @@ pub fn is_internet_blocked() -> Result<bool, String> {
     #[cfg(not(windows))]
     {
         Ok(false)
+    }
+}
+
+// ------------------------------------------------------ tarayıcı uyarısı
+
+/// Tarayıcı kullanılırken uyarının yeniden gösterilmesi için geçmesi gereken süre.
+///
+/// Uyarı penceresi öne gelince tarayıcı arka planda kalır; öğrenci pencereyi
+/// kapatınca tarayıcı yeniden öne geçer. Bu aralık olmadan uyarı kapatıldığı
+/// anda yeniden açılırdı.
+const WARN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// Öndeki pencerenin hangi sıklıkla yoklanacağı.
+#[cfg(windows)]
+const WATCH_POLL: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Yaygın tarayıcıların çalıştırılabilir dosya adları (küçük harf, uzantısız).
+const BROWSERS: &[&str] = &[
+    "chrome",
+    "msedge",
+    "firefox",
+    "opera",
+    "opera_gx",
+    "brave",
+    "vivaldi",
+    "browser",
+    "iexplore",
+    "chromium",
+    "waterfox",
+    "librewolf",
+];
+
+/// Verilen program yolu bir tarayıcıya mı ait?
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_browser(exe_path: &str) -> bool {
+    let name = exe_path
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(exe_path)
+        .to_lowercase();
+    let stem = name.strip_suffix(".exe").unwrap_or(&name);
+    BROWSERS.contains(&stem)
+}
+
+/// Uyarının ne zaman gösterileceğine karar verir.
+///
+/// İnternet kesikken öğrenci bir tarayıcıyı öne aldığında uyarı hemen çıkar;
+/// tarayıcıda kalmaya devam ederse [`WARN_INTERVAL`] aralığıyla yinelenir.
+#[derive(Default)]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct BrowserNag {
+    last_shown: Option<std::time::Instant>,
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+impl BrowserNag {
+    fn should_warn(&mut self, browser_in_front: bool, now: std::time::Instant) -> bool {
+        if !browser_in_front {
+            return false;
+        }
+        if self
+            .last_shown
+            .is_some_and(|t| now.duration_since(t) < WARN_INTERVAL)
+        {
+            return false;
+        }
+        self.last_shown = Some(now);
+        true
+    }
+}
+
+/// İnternet kesikken tarayıcı kullanımını izler ve `warn`'ı çağırır.
+///
+/// Tarayıcının *içinde* her site için bir uyarı sayfası gösterilemez: siteler
+/// şifreli (HTTPS) açılır ve araya girmek için bilgisayara sahte bir kök
+/// sertifika kurmak gerekir; bu, o bilgisayardaki bütün şifreli bağlantıların
+/// güvenliğini bozar ve yapılmaz. Bunun yerine öğrenci herhangi bir
+/// tarayıcıyı öne aldığında OpenClass kendi uyarısını gösterir; hangi
+/// tarayıcı ya da site olduğu fark etmez.
+///
+/// İzleme yalnızca engel bu oturumda uygulanmışken çalışır ve engel kalkınca
+/// kendiliğinden biter. Yalnızca öndeki pencerenin program adına bakılır;
+/// adres, başlık ya da içerik okunmaz ve hiçbir şey kaydedilmez.
+pub fn watch_browsers(warn: impl Fn() + Send + 'static) {
+    #[cfg(windows)]
+    {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static WATCHING: AtomicBool = AtomicBool::new(false);
+        if WATCHING.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let spawned = std::thread::Builder::new()
+            .name("openclass-browser-watch".into())
+            .spawn(move || {
+                let mut nag = BrowserNag::default();
+                // Engel uygulanırken zaten bir bildirim gösterildi; öğrenci o
+                // anda tarayıcıdaysa aynı uyarı hemen ikinci kez çıkmasın.
+                if foreground_exe().is_some_and(|exe| is_browser(&exe)) {
+                    nag.last_shown = Some(std::time::Instant::now());
+                }
+                while APPLIED.load(Ordering::Relaxed) {
+                    let in_front = foreground_exe().is_some_and(|exe| is_browser(&exe));
+                    if nag.should_warn(in_front, std::time::Instant::now()) {
+                        warn();
+                    }
+                    std::thread::sleep(WATCH_POLL);
+                }
+                WATCHING.store(false, Ordering::SeqCst);
+            });
+        if spawned.is_err() {
+            WATCHING.store(false, Ordering::SeqCst);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = warn;
+    }
+}
+
+/// Öndeki pencerenin ait olduğu programın tam yolu.
+#[cfg(windows)]
+fn foreground_exe() -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId,
+    };
+
+    // SAFETY: Çağrılar yalnızca okuma yapar; tutamaç kapatılır ve tampon
+    // boyutu API'ye bildirilir.
+    unsafe {
+        let window = GetForegroundWindow();
+        if window.is_null() {
+            return None;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(window, &mut pid);
+        if pid == 0 {
+            return None;
+        }
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return None;
+        }
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(process, 0, buf.as_mut_ptr(), &mut len);
+        CloseHandle(process);
+        (ok != 0).then(|| String::from_utf16_lossy(&buf[..len as usize]))
     }
 }
 
@@ -404,18 +588,16 @@ fn start_warning_server() -> Result<(), String> {
     let t = token.clone();
     let handle = std::thread::Builder::new()
         .name("openclass-warning-server".into())
-        .spawn(move || {
-            loop {
-                if t.is_cancelled() {
-                    break;
+        .spawn(move || loop {
+            if t.is_cancelled() {
+                break;
+            }
+            match listener.accept() {
+                Ok((mut stream, _)) => serve_warning(&mut stream),
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
                 }
-                match listener.accept() {
-                    Ok((mut stream, _)) => serve_warning(&mut stream),
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(std::time::Duration::from_millis(50));
-                    }
-                    Err(_) => break,
-                }
+                Err(_) => break,
             }
         })
         .map_err(|e| format!("uyarı sunucusu iş parçacığı başlatılamadı: {e}"))?;
@@ -543,6 +725,47 @@ fn run_netsh(args: &[&str]) -> Result<String, String> {
             ))
         }
         Err(err) => Err(format!("netsh çalıştırılamadı: {err}")),
+    }
+}
+
+#[cfg(test)]
+mod browser_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn tarayicilar_taninir() {
+        assert!(is_browser(
+            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+        ));
+        assert!(is_browser(
+            "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\MSEDGE.EXE"
+        ));
+        assert!(is_browser("firefox.exe"));
+        assert!(!is_browser("C:\\Windows\\explorer.exe"));
+        assert!(!is_browser(
+            "C:\\Program Files\\Microsoft Office\\WINWORD.EXE"
+        ));
+        // Adında tarayıcı adı geçen başka bir program tarayıcı sayılmaz.
+        assert!(!is_browser("chrome_installer.exe"));
+    }
+
+    #[test]
+    fn uyari_tarayici_one_gelince_cikar_ve_araliksiz_yinelenmez() {
+        let mut nag = BrowserNag::default();
+        let t0 = Instant::now();
+        assert!(
+            !nag.should_warn(false, t0),
+            "tarayıcı önde değilken uyarı yok"
+        );
+        assert!(
+            nag.should_warn(true, t0),
+            "tarayıcı öne gelince hemen uyarılır"
+        );
+        // Öğrenci uyarıyı kapatıp tarayıcıya döndü: hemen yeniden çıkmaz.
+        assert!(!nag.should_warn(true, t0 + Duration::from_secs(5)));
+        assert!(!nag.should_warn(false, t0 + WARN_INTERVAL));
+        assert!(nag.should_warn(true, t0 + WARN_INTERVAL));
     }
 }
 
