@@ -53,6 +53,8 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(45);
 /// 'Yetkilendir' deyince sonraki bağlantı `Authorized` gelir ve otomatik
 /// kabul görülür.
 const AUTO_PROBE_INTERVAL: Duration = Duration::from_secs(5);
+/// Başlatılamayan ya da duran ekran yakalamanın yeniden deneme aralığı.
+const CAPTURE_RETRY_INTERVAL: Duration = Duration::from_secs(4);
 /// Giden mesaj kuyruğu. Dolarsa kareler düşürülür; bellek şişmez.
 const SEND_QUEUE: usize = 8;
 
@@ -236,6 +238,35 @@ fn discovered_target(state: &AppState) -> Option<ConnectTarget> {
         port: seen.control_port,
         fingerprint: seen.fingerprint.clone(),
     })
+}
+
+/// Ağda açık bir konsol görüldüğü hâlde bu bilgisayar hiçbirinin sınıfına
+/// uymuyorsa nedenini açıklar.
+///
+/// Böyle bir bilgisayar hiçbir konsola başvurmaz ve kurulumu yapan kişi
+/// yalnızca "eşleştirilmedi" görür; sorunun ad olduğu buradan anlaşılır.
+pub fn scope_hint(state: &AppState) -> Option<String> {
+    let room = state.config.read().room.clone();
+    let now = unix_now();
+    let teachers = state.teachers.read();
+    if pick_teacher(teachers.values(), &state.hostname, room.as_deref(), now).is_some() {
+        return None;
+    }
+    let live = teachers
+        .values()
+        .filter(|t| now - t.last_seen <= TEACHER_FRESH_SECS)
+        .max_by_key(|t| t.last_seen)?;
+    let class = match (live.prefix.as_deref(), live.room.as_deref()) {
+        (Some(prefix), _) => format!("adı {prefix} ile başlayan bilgisayarları"),
+        (None, Some(room)) => format!("{room} odasındaki bilgisayarları"),
+        (None, None) => return None,
+    };
+    Some(format!(
+        "Öğretmen konsolu ({}) görülüyor, ama yalnızca {class} yönetiyor. Bu bilgisayarın adı \
+         {}. Kendiliğinden bağlanması için oda adına sınıfın adını yazın, Windows bilgisayar \
+         adını değiştirip yeniden başlatın ya da eşleştirme kodu girin.",
+        live.teacher_name, state.hostname
+    ))
 }
 
 /// Başvurulacak konsolu seçer.
@@ -686,6 +717,9 @@ async fn session_loop(
     // multicast alıcısını arkada çalışır hâlde bırakmaz.
     let mut ctx = SessionCtx {
         stream: None,
+        wanted: None,
+        last_capture_error: None,
+        start_now: false,
         transfer: None,
         multicast: MulticastGuard(None),
         teacher_ip,
@@ -693,12 +727,45 @@ async fn session_loop(
     // Yayın yokken tetiklenmemesi için uzun aralıkla başlar.
     let mut frame_timer = tokio::time::interval(Duration::from_secs(3600));
     frame_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut retry_timer = tokio::time::interval(CAPTURE_RETRY_INTERVAL);
+    retry_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    // Süren yakalama başlatma denemesi. Yakalamanın kurulması saniyeler
+    // sürebilir (arka ucun ilk kareyi beklemesi, yeniden denemeler); ayrı bir
+    // iş parçacığında yürür ki bu sırada öğretmenin komutları beklemesin.
+    let mut starting: Option<tokio::task::JoinHandle<Result<ScreenStream>>> = None;
 
     loop {
+        if std::mem::take(&mut ctx.start_now) && starting.is_none() && ctx.stream.is_none() {
+            if let Some((stream_id, quality)) = ctx.wanted {
+                let hostname = state.hostname.clone();
+                starting = Some(tokio::task::spawn_blocking(move || {
+                    ScreenStream::start(stream_id, quality, &hostname)
+                }));
+            }
+        }
+
         tokio::select! {
             _ = cancel.cancelled() => {
                 if let Some(s) = ctx.stream.take() { s.stop(state); }
                 return Ok(());
+            }
+
+            // Öğretmen yayın istiyor ama yakalama çalışmıyor: yeniden dene.
+            _ = retry_timer.tick(),
+                if ctx.stream.is_none() && ctx.wanted.is_some() && starting.is_none() =>
+            {
+                ctx.start_now = true;
+            }
+
+            started = async { starting.as_mut().expect("koşul denetlendi").await },
+                if starting.is_some() =>
+            {
+                starting = None;
+                let started = started
+                    .unwrap_or_else(|err| Err(anyhow!("yakalama görevi başarısız: {err}")));
+                finish_stream_start(state, tx, &mut ctx, &mut frame_timer, started).await;
+                retry_timer.reset();
             }
 
             _ = frame_timer.tick(), if ctx.stream.is_some() => {
@@ -712,12 +779,15 @@ async fn session_loop(
                             stream_id: s.stream_id,
                             reason: text.clone(),
                         });
+                        if let Some(s) = ctx.stream.take() { s.stop(state); }
                         state.set_sharing(SharingState {
                             active: false,
-                            error: Some(text),
+                            error: Some(text.clone()),
                             ..SharingState::default()
                         });
-                        if let Some(s) = ctx.stream.take() { s.stop(state); }
+                        // Yayın isteği sürüyor; yakalama aralıklarla yeniden denenir.
+                        ctx.last_capture_error = Some(text);
+                        retry_timer.reset();
                     }
                 }
             }
@@ -766,6 +836,7 @@ async fn handle_server_message(
         // gönderir; ikinci bir yakalama başlatmak DXGI yolunda "Parametre
         // hatalı" hatasına, WGC yolunda saniyelerce beklemeye yol açar.
         ServerMessage::StartScreenStream { stream_id, quality } if ctx.stream.is_some() => {
+            ctx.wanted = Some((stream_id, quality));
             if let Some(s) = ctx.stream.as_mut() {
                 s.stream_id = stream_id;
                 s.quality = quality;
@@ -778,39 +849,15 @@ async fn handle_server_message(
         }
 
         ServerMessage::StartScreenStream { stream_id, quality } => {
-            match ScreenStream::start(stream_id, quality, &state.hostname) {
-                Ok(s) => {
-                    tracing::info!(stream_id, backend = s.backend, "ekran yayını başladı");
-                    state.set_sharing(SharingState {
-                        active: true,
-                        backend: Some(s.backend.to_string()),
-                        fps: Some(quality.fps),
-                        width: None,
-                        height: None,
-                        error: None,
-                    });
-                    *frame_timer = fps_timer(quality.fps);
-                    ctx.stream = Some(s);
-                }
-                Err(err) => {
-                    let text = format!("{err:#}");
-                    tracing::error!(hata = %text, "ekran yakalama başlatılamadı");
-                    let _ = tx
-                        .send(ClientMessage::ScreenError {
-                            stream_id,
-                            reason: text.clone(),
-                        })
-                        .await;
-                    state.set_sharing(SharingState {
-                        active: false,
-                        error: Some(text),
-                        ..SharingState::default()
-                    });
-                }
-            }
+            ctx.wanted = Some((stream_id, quality));
+            ctx.last_capture_error = None;
+            ctx.start_now = true;
         }
 
         ServerMessage::UpdateStreamQuality { quality, .. } => {
+            if let Some(wanted) = ctx.wanted.as_mut() {
+                wanted.1 = quality;
+            }
             if let Some(s) = ctx.stream.as_mut() {
                 tracing::debug!(fps = quality.fps, "yayın kalitesi değişti");
                 s.quality = quality;
@@ -1467,6 +1514,8 @@ async fn handle_server_message(
         }
 
         ServerMessage::StopScreenStream { .. } => {
+            ctx.wanted = None;
+            ctx.last_capture_error = None;
             if let Some(s) = ctx.stream.take() {
                 tracing::info!("ekran yayını durduruldu");
                 s.stop(state);
@@ -1529,6 +1578,64 @@ async fn handle_server_message(
         }
     }
     Ok(())
+}
+
+/// Biten bir yakalama başlatma denemesinin sonucunu uygular.
+///
+/// Başarısızsa yayın isteği yerinde kalır ve oturum döngüsü
+/// [`CAPTURE_RETRY_INTERVAL`] aralığıyla yeniden dener. Hata öğretmene
+/// yalnızca değiştiğinde bildirilir.
+async fn finish_stream_start(
+    state: &Arc<AppState>,
+    tx: &mpsc::Sender<ClientMessage>,
+    ctx: &mut SessionCtx,
+    frame_timer: &mut tokio::time::Interval,
+    started: Result<ScreenStream>,
+) {
+    // Deneme sürerken öğretmen yayını durdurmuş ya da kaliteyi değiştirmiş olabilir.
+    let Some((stream_id, quality)) = ctx.wanted else {
+        if let Ok(s) = started {
+            s.session.stop();
+        }
+        return;
+    };
+
+    match started {
+        Ok(mut s) => {
+            s.stream_id = stream_id;
+            s.quality = quality;
+            tracing::info!(stream_id, backend = s.backend, "ekran yayını başladı");
+            state.set_sharing(SharingState {
+                active: true,
+                backend: Some(s.backend.to_string()),
+                fps: Some(quality.fps),
+                width: None,
+                height: None,
+                error: None,
+            });
+            *frame_timer = fps_timer(quality.fps);
+            ctx.last_capture_error = None;
+            ctx.stream = Some(s);
+        }
+        Err(err) => {
+            let text = format!("{err:#}");
+            if ctx.last_capture_error.as_deref() != Some(text.as_str()) {
+                tracing::error!(hata = %text, "ekran yakalama başlatılamadı; yeniden denenecek");
+                let _ = tx
+                    .send(ClientMessage::ScreenError {
+                        stream_id,
+                        reason: text.clone(),
+                    })
+                    .await;
+                state.set_sharing(SharingState {
+                    active: false,
+                    error: Some(text.clone()),
+                    ..SharingState::default()
+                });
+                ctx.last_capture_error = Some(text);
+            }
+        }
+    }
 }
 
 fn fps_timer(fps: u8) -> tokio::time::Interval {
@@ -1906,6 +2013,19 @@ fn stream_file(
 struct SessionCtx {
     /// Çalışan ekran paylaşımı.
     stream: Option<ScreenStream>,
+    /// Öğretmenin istediği yayın: kimliği ve kalitesi.
+    ///
+    /// Yakalama başlatılamadığında ya da sonradan durduğunda yayın isteği
+    /// kaybolmaz; `stream` boşken bu doluysa yakalama aralıklarla yeniden
+    /// denenir. Windows, kilit ekranı ve yönetici izni penceresi gibi
+    /// korumalı ekranlar açıkken yakalamayı reddeder ("Erişim engellendi");
+    /// ekran normale dönünce yayın kendiliğinden gelmelidir.
+    wanted: Option<(u32, StreamQuality)>,
+    /// Öğretmene en son bildirilen yakalama hatası; aynı hata her denemede
+    /// yeniden gönderilmez.
+    last_capture_error: Option<String>,
+    /// Yakalamanın bir sonraki döngü turunda başlatılması isteniyor.
+    start_now: bool,
     /// Aynı anda tek dosya alınır; aktarım bağlantı boyunca yaşar.
     transfer: Option<crate::transfer::Incoming>,
     /// Multicast alıcısı; muhafız `Drop` ile durdurur.
@@ -1982,6 +2102,14 @@ mod tests {
         )
         .is_none());
         assert!(pick_teacher(list.iter(), "BLAB1_04", None, 1_000 + TEACHER_FRESH_SECS).is_some());
+    }
+
+    #[test]
+    fn oda_adi_sinifa_uyan_bilgisayar_konsola_basvurur() {
+        // Windows adı değişmemiş, ama ajan penceresine sınıfın adı yazılmış.
+        let list = [teacher("10.0.0.2", Some("LAB2"), 5_000)];
+        assert!(pick_teacher(list.iter(), "DESKTOP-1QSVN3M", None, 5_000).is_none());
+        assert!(pick_teacher(list.iter(), "DESKTOP-1QSVN3M", Some("LAB2"), 5_000).is_some());
     }
 
     #[test]

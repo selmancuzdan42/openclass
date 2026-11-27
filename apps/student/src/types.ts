@@ -75,4 +75,6 @@ export interface StatusSnapshot {
   captureSupported: boolean;
   /** Bu bilgisayarın bulunduğu laboratuvar/oda adı; girilmemişse `null`. */
   room: string | null;
+  /** Konsol görülüyor ama bu bilgisayar sınıfına uymuyorsa açıklaması. */
+  scopeHint: string | null;
 }

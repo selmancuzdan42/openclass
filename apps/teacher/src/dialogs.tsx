@@ -644,7 +644,12 @@ function inChoice(device: DeviceView, choice: ClassChoice): boolean {
   const room = choice.room.trim().toUpperCase();
   const prefix = choice.prefix.trim().toUpperCase();
   if (room && (device.room ?? "").trim().toUpperCase() !== room) return false;
-  if (prefix && !device.hostname.trim().toUpperCase().startsWith(prefix)) return false;
+  if (
+    prefix &&
+    !device.hostname.trim().toUpperCase().startsWith(prefix) &&
+    !(device.room ?? "").trim().toUpperCase().startsWith(prefix)
+  )
+    return false;
   return true;
 }
 

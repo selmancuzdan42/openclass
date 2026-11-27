@@ -40,8 +40,24 @@ pub struct Session {
     running: Arc<AtomicBool>,
 }
 
+/// İlk birkaç başlatma denemesini başarısız kılan test değişkeni.
+///
+/// Yalnızca test içindir: `OPENCLASS_CAPTURE_FAIL_FIRST=3`, yakalamanın
+/// kilit ekranı gibi geçici bir engelle reddedilip sonra düzelmesini taklit
+/// eder; ajanın yeniden denemesi Windows olmadan sınanabilir.
+const FAIL_FIRST_VAR: &str = "OPENCLASS_CAPTURE_FAIL_FIRST";
+
 impl Session {
     pub fn start(label: &str) -> Result<Self> {
+        static ATTEMPTS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let fail_first: u32 = std::env::var(FAIL_FIRST_VAR)
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0);
+        if ATTEMPTS.fetch_add(1, Ordering::Relaxed) < fail_first {
+            anyhow::bail!("test: ekran yakalama geçici olarak reddedildi");
+        }
+
         let (width, height) = desired_size();
         let slot: FrameSlot = Arc::new(Mutex::new(None));
         let running = Arc::new(AtomicBool::new(true));

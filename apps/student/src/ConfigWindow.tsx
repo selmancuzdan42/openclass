@@ -452,6 +452,13 @@ function StatusCard({
         <span className={`mt-1 size-[9px] shrink-0 rounded-full ${dot}`} />
         <div className="min-w-0 flex-1">
           <p className="text-[12.5px] font-medium leading-tight">{text}</p>
+          {snapshot.scopeHint && (
+            // Konsol ağda ama bu bilgisayar sınıfına uymuyor: nedeni açıkça yazılır.
+            <p className="mt-1 rounded bg-[var(--color-warn)]/10 px-2 py-1.5 text-[11.5px]
+              leading-relaxed text-[var(--color-text)]">
+              {snapshot.scopeHint}
+            </p>
+          )}
           <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--color-text-3)]">
             <Monitor size={11} />
             {snapshot.sharing.active

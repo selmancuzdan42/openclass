@@ -368,7 +368,14 @@ function Console() {
       if (oda && (d.room ?? "").trim().toUpperCase() !== oda) return false;
       // Ön ek süzmesi oda süzmesinden bağımsızdır; ikisi birlikte verilirse
       // ikisi birden uygulanır.
-      if (onek && !d.hostname.toUpperCase().startsWith(onek)) return false;
+      // Ön ek bilgisayar adında ya da öğrencinin girdiği oda adında aranır
+      // (Rust'taki `scope_match` ile aynı kural).
+      if (
+        onek &&
+        !d.hostname.toUpperCase().startsWith(onek) &&
+        !(d.room ?? "").trim().toUpperCase().startsWith(onek)
+      )
+        return false;
       if (!search) return true;
       return (
         d.hostname.toUpperCase().startsWith(search) ||

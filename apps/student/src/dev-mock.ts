@@ -41,6 +41,7 @@ const snapshot: StatusSnapshot = {
   captureSupported: true,
   // Sihirbazı denemek için `null` yapın: oda ve eşleştirme yoksa açılır.
   room: "Lab 1",
+  scopeHint: null,
 };
 
 const HANDLERS: Record<string, () => unknown> = {

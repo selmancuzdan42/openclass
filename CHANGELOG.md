@@ -3,6 +3,28 @@
 Bu dosya [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/) biçimini,
 sürüm numaraları [Semantic Versioning](https://semver.org/lang/tr/) kurallarını izler.
 
+## [0.6.1] — 2026-11-27
+
+Öğretmen ve öğrenci programı birlikte güncellenmelidir.
+
+### Değiştirildi
+- **Oda adı sınıf eşleşmesinde sayılır.** Öğretmenin sınıfı `LAB2` ise,
+  Windows bilgisayar adı uymayan ama öğrenci penceresinde oda adına `LAB2`
+  yazılmış bilgisayar da kendiliğinden bağlanır. Windows adını değiştirip
+  yeniden başlatmak gerekmez.
+- Öğrenci penceresi, öğretmen konsolunu gördüğü hâlde sınıfına uymadığı için
+  bağlanamıyorsa nedenini ve çözüm yollarını yazar.
+
+### Düzeltildi
+- **Ekran yakalama reddedildiğinde yayın bir daha gelmiyordu.** Öğretmen
+  konsolu kapatılıp açıldığında bazı bilgisayarlarda "DXGI Desktop
+  Duplication başlatılamadı: Erişim engellendi (0x80070005)" çıkıyor ve ekran
+  o oturum boyunca gelmiyordu. Windows, kilit ekranı ya da yönetici izni
+  penceresi gibi korumalı ekranlar açıkken yakalamayı reddeder; ajan artık
+  yayın isteğini bırakmıyor ve yakalamayı birkaç saniyede bir yeniden
+  deniyor. Yakalama sonradan durursa da aynı şekilde toparlanır.
+- Ekran yakalama başlatılırken öğretmenin diğer komutları bekliyordu.
+
 ## [0.6.0] — 2026-11-26
 
 Öğretmen ve öğrenci programı **birlikte** güncellenmelidir: toplama sonuçları,

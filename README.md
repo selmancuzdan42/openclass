@@ -5,7 +5,7 @@ laboratuvarları için tasarlanmış sınıf yönetim yazılımı: öğretmen ye
 öğrenci bilgisayarlarını bulur, güvenli biçimde eşleştirir ve ders
 boyunca ekranlarını canlı izler.
 
-> **Durum:** v0.6.0 yayında. Aşağıdaki "Mevcut durum" bölümü neyin
+> **Durum:** v0.6.1 yayında. Aşağıdaki "Mevcut durum" bölümü neyin
 > çalıştığını açıkça listeler.
 
 ## Neden?

@@ -129,7 +129,8 @@ pub enum HostnameFilter {
 ///
 /// NetSupport'un "Room" ve "Browse" kipleriyle aynı mantık: konsol bir oda
 /// adı ve/veya bilgisayar adı ön eki seçer; yalnızca bunlara uyan cihazlar
-/// o konsola aittir. İkisi birlikte verilirse ikisi de sağlanmalıdır; ikisi
+/// o konsola aittir. Ön ek, bilgisayar adında ya da öğrencinin girdiği oda
+/// adında aranır. İkisi birlikte verilirse ikisi de sağlanmalıdır; ikisi
 /// de boşsa kapsam "tümü"dür ve her cihaz uyar.
 ///
 /// Aynı kural üç yerde uygulanır ve aynı kalmalıdır: öğrencinin hangi konsola
@@ -158,7 +159,13 @@ pub fn scope_match(
         score += 1_000;
     }
     if let Some(prefix) = prefix {
-        if !norm(hostname).starts_with(&prefix) {
+        // Ön ek bilgisayar adında aranır; uymuyorsa öğrencinin girdiği oda
+        // adına da bakılır. Windows bilgisayar adını değiştirmek yeniden
+        // başlatma ister ve her okulda yapılamaz; ajan penceresine `LAB2`
+        // yazmak aynı sonucu vermelidir.
+        let by_name = norm(hostname).starts_with(&prefix);
+        let by_room = device_room.is_some_and(|r| norm(r).starts_with(&prefix));
+        if !by_name && !by_room {
             return None;
         }
         score += prefix.chars().count();
@@ -314,6 +321,10 @@ mod tests {
         assert!(scope_match(None, Some("lab1"), "Lab120", None).is_some());
         assert!(scope_match(None, Some("LAB1"), "LAB201", None).is_none());
         assert!(scope_match(None, Some("BIL"), "BIL101", None).is_some());
+        // Bilgisayar adı uymuyor ama öğrenci oda adına sınıfın adını yazmış.
+        assert!(scope_match(None, Some("LAB2"), "DESKTOP-1QSVN3M", Some("lab2")).is_some());
+        assert!(scope_match(None, Some("LAB2"), "DESKTOP-1QSVN3M", Some("LAB1")).is_none());
+        assert!(scope_match(None, Some("LAB2"), "DESKTOP-1QSVN3M", None).is_none());
     }
 
     #[test]

@@ -58,7 +58,7 @@ let groups = [
 
 const serverInfo: ServerInfo = {
   // `?surum=0.5.0` ile eski bir sürüm taklit edilir; güncelleme penceresi açılır.
-  appVersion: new URLSearchParams(location.search).get("surum") ?? "0.6.0",
+  appVersion: new URLSearchParams(location.search).get("surum") ?? "0.6.1",
   teacherId: "22222222-2222-4222-8222-222222222222",
   teacherName: "Cihan Güngör",
   className: "Lab 1 — 11-A Bilişim",

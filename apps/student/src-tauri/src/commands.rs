@@ -30,10 +30,15 @@ pub struct StatusSnapshot {
     pub capture_supported: bool,
     /// Bu bilgisayarın bulunduğu laboratuvar/oda adı.
     pub room: Option<String>,
+    /// Konsol görülüyor ama bu bilgisayar sınıfına uymuyorsa açıklaması.
+    pub scope_hint: Option<String>,
 }
 
 #[tauri::command]
 pub fn get_status(state: State<'_, Arc<AppState>>) -> CmdResult<StatusSnapshot> {
+    let scope_hint = matches!(*state.status.read(), ConnectionStatus::NotPaired)
+        .then(|| crate::net::client::scope_hint(&state))
+        .flatten();
     let cfg = state.config.read();
     Ok(StatusSnapshot {
         hostname: state.hostname.clone(),
@@ -51,6 +56,7 @@ pub fn get_status(state: State<'_, Arc<AppState>>) -> CmdResult<StatusSnapshot> 
         notices: state.notices.read().clone(),
         capture_supported: openclass_screen::is_supported(),
         room: cfg.room.clone(),
+        scope_hint,
     })
 }
 
@@ -81,6 +87,8 @@ pub fn set_room(state: State<'_, Arc<AppState>>, room: String) -> CmdResult<()> 
         .map_err(|e| format!("Oda adı kaydedilemedi: {e}"))?;
 
     tracing::info!(oda = %temiz, "oda adı ayarlandı");
+    // Yeni oda adı bir konsolun sınıfına uyuyor olabilir; beklemeden denensin.
+    state.wake.notify_waiters();
     state.emit("status-changed", ());
     Ok(())
 }
