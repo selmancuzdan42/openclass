@@ -1,0 +1,21 @@
+OpenClass - Güvenlik duvarı izni
+
+Öğrenci bilgisayarı öğretmen konsolunda görünmüyorsa:
+
+1. Bilgisayar adını değiştirdiyseniz bilgisayarı yeniden başlatın.
+
+2. Komut İstemi'ni yönetici olarak açın ve şu iki satırı çalıştırın
+   (yolu programın bulunduğu yere göre düzeltin):
+
+netsh advfirewall firewall delete rule name=all program="C:\yol\OpenClass-Student.exe"
+netsh advfirewall firewall add rule name="OpenClass Student" dir=in action=allow program="C:\yol\OpenClass-Student.exe" enable=yes profile=any
+
+3. Öğrenci programını kapatıp yeniden açın.
+
+Komut kullanmadan:
+Denetim Masası > Windows Defender Güvenlik Duvarı > Bir uygulamaya izin ver
+> OpenClass Student > "Özel" ve "Ortak" kutularını işaretleyin.
+
+Güvenlik duvarına dokunmadan:
+Öğretmen konsolunda "Cihaz Eşleştir" ile kod üretin. Öğrencinin yapılandırma
+penceresine öğretmenin IP adresini ve kodu girin.
